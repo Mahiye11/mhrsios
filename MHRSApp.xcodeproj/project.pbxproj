@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		9D2EF9FD2E46369500E9C10E /* SQLite in Frameworks */ = {isa = PBXBuildFile; productRef = 9D2EF9FC2E46369500E9C10E /* SQLite */; };
+		9DC8EF332E5875710045F5F5 /* MHRSApp-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9DC8EF322E5875710045F5F5 /* MHRSApp-Info.plist */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		9D9D6BDC2E42309F006EF58D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,17 +29,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		9D49218A2E4A088E006164D5 /* MHRSApp-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "MHRSApp-Info.plist"; sourceTree = "<group>"; };
 		9D9D6BCB2E42309E006EF58D /* MHRSApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MHRSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9D9D6BDB2E42309F006EF58D /* MHRSAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MHRSAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9D9D6BE52E42309F006EF58D /* MHRSAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MHRSAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9DC8EF322E5875710045F5F5 /* MHRSApp-Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = "MHRSApp-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		9D9D6BCD2E42309E006EF58D /* MHRSApp */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = MHRSApp;
-			sourceTree = "<group>";
-		};
 		9D9D6BDE2E42309F006EF58D /* MHRSAppTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = MHRSAppTests;
@@ -45,6 +47,11 @@
 			path = MHRSAppUITests;
 			sourceTree = "<group>";
 		};
+		9D9D6C1E2E4238BD006EF58D /* New Folder */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "New Folder";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +59,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9D2EF9FD2E46369500E9C10E /* SQLite in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,7 +83,9 @@
 		9D9D6BC22E42309E006EF58D = {
 			isa = PBXGroup;
 			children = (
-				9D9D6BCD2E42309E006EF58D /* MHRSApp */,
+				9D49218A2E4A088E006164D5 /* MHRSApp-Info.plist */,
+				9DC8EF322E5875710045F5F5 /* MHRSApp-Info.plist */,
+				9D9D6C1E2E4238BD006EF58D /* New Folder */,
 				9D9D6BDE2E42309F006EF58D /* MHRSAppTests */,
 				9D9D6BE82E42309F006EF58D /* MHRSAppUITests */,
 				9D9D6BCC2E42309E006EF58D /* Products */,
@@ -108,10 +118,11 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				9D9D6BCD2E42309E006EF58D /* MHRSApp */,
+				9D9D6C1E2E4238BD006EF58D /* New Folder */,
 			);
 			name = MHRSApp;
 			packageProductDependencies = (
+				9D2EF9FC2E46369500E9C10E /* SQLite */,
 			);
 			productName = MHRSApp;
 			productReference = 9D9D6BCB2E42309E006EF58D /* MHRSApp.app */;
@@ -195,6 +206,9 @@
 			);
 			mainGroup = 9D9D6BC22E42309E006EF58D;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				9D2EF9FB2E46358E00E9C10E /* XCRemoteSwiftPackageReference "SQLite" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9D9D6BCC2E42309E006EF58D /* Products */;
 			projectDirPath = "";
@@ -212,6 +226,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9DC8EF332E5875710045F5F5 /* MHRSApp-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -395,9 +410,14 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"MHRSApp/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MHRSApp-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ses analizi için mikrofon erişimi gerekiyor.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Bu uygulama, sesli komutlarınızı metne dönüştürmek için konuşma tanıma servisine ihtiyaç duyar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -423,9 +443,14 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"MHRSApp/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MHRSApp-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ses analizi için mikrofon erişimi gerekiyor.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Bu uygulama, sesli komutlarınızı metne dönüştürmek için konuşma tanıma servisine ihtiyaç duyar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -552,6 +577,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9D2EF9FB2E46358E00E9C10E /* XCRemoteSwiftPackageReference "SQLite" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stephencelis/SQLite.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.15.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9D2EF9FC2E46369500E9C10E /* SQLite */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9D2EF9FB2E46358E00E9C10E /* XCRemoteSwiftPackageReference "SQLite" */;
+			productName = SQLite;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9D9D6BC32E42309E006EF58D /* Project object */;
 }
