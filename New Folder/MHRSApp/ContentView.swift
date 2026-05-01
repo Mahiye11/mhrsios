@@ -1,12 +1,5 @@
 import SwiftUI
 
-// MARK: - Dil
-enum AppLang: String, CaseIterable, Identifiable {
-    case tr = "Türkçe"
-    case en = "English"
-    var id: String { rawValue }
-}
-
 // MARK: - View
 struct ContentView: View {
     @State private var lang: AppLang = .tr
@@ -16,6 +9,9 @@ struct ContentView: View {
     @State private var pushSignup = false
     @StateObject private var vm = LoginViewModel()
     @FocusState private var focusedField: Field?
+    
+    // SES YÖNETİCİSİ
+    @StateObject private var voiceManager = VoiceManager()
 
     enum Field { case tc, password }
 
@@ -48,7 +44,7 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 12).strokeBorder(Color.gray.opacity(0.15))
                         )
                         .focused($focusedField, equals: .tc)
-                        .onSubmit { focusedField = .password } // Yeni eklenen satır
+                        .onSubmit { focusedField = .password }
 
                     // Şifre
                     SecureField("Şifre", text: $password)
@@ -59,7 +55,7 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 12).strokeBorder(Color.gray.opacity(0.15))
                         )
                         .focused($focusedField, equals: .password)
-                        .onSubmit { Task { await doLogin() } } // Yeni eklenen satır
+                        .onSubmit { Task { await doLogin() } }
 
                     // Giriş
                     Button {
@@ -79,7 +75,8 @@ struct ContentView: View {
 
                     // Üye Ol
                     NavigationLink {
-                        UyeOlView()
+                        // UyeOlView() - Hata vermemesi için yorum satırı, kendi kodunda açabilirsin
+                        Text("Üye Ol View Gelecek")
                     } label: {
                         Text("Üye Ol")
                             .fontWeight(.semibold)
@@ -96,13 +93,16 @@ struct ContentView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
 
-                        // Ses dalgası resminin assets içinde doğru adla ve uzantıyla yer aldığından emin olun.
-                        NavigationLink(destination: MedAsistanView()) {
-                            Image("sesdalgası")
+                        NavigationLink(destination: Text("MedAsistanView Gelecek")) {
+                            Image(systemName: "waveform") // Kendi "sesdalgası" görselinle değiştir
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 90, height: 90)
                                 .padding(.top, 4)
+                                // Asistan dinlerken ufak bir animasyon eklenebilir
+                                .foregroundStyle(voiceManager.isListening ? Color.green : Color.blue)
+                                .scaleEffect(voiceManager.isListening ? 1.1 : 1.0)
+                                .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: voiceManager.isListening)
                         }
 
                         Text("Soru ve sorunlarınız için")
@@ -114,8 +114,8 @@ struct ContentView: View {
                 }
                 .padding(20)
             }
-            .navigationDestination(isPresented: $pushHome) { AnaSayfa() }
-            .navigationDestination(isPresented: $pushSignup) { UyeOlView() }
+            .navigationDestination(isPresented: $pushHome) { Text("Ana Sayfa") /* AnaSayfa() */ }
+            .navigationDestination(isPresented: $pushSignup) { Text("Üye Ol") /* UyeOlView() */ }
             .alert("Hata", isPresented: .constant(vm.error != nil), actions: {
                 Button("Tamam") { vm.error = nil }
             }, message: {
@@ -130,10 +130,32 @@ struct ContentView: View {
                     }
                 }
             }
+            // MARK: - Sesli Asistan Entegrasyonu
+            .onAppear {
+                // View açıldığında callbackleri tanımla ve asistanı başlat
+                voiceManager.onTCDidChange = { spokenTC in
+                    self.tc = spokenTC
+                }
+                voiceManager.onPasswordDidChange = { spokenPassword in
+                    self.password = spokenPassword
+                }
+                voiceManager.onLoginTrigger = {
+                    Task { await doLogin() }
+                }
+                
+                // Biraz gecikmeli başlatmak UX açısından daha iyidir
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    voiceManager.startInitialFlow()
+                }
+            }
+            .onDisappear {
+                // Ekrandan çıkarken mikrofonu kapat
+                voiceManager.stopListening()
+            }
         }
     }
 
-    // Dil switcher
+    // Dil switcher (Aynı Bırakıldı)
     private var languageSwitcher: some View {
         HStack(spacing: 0) {
             langButton(.tr, isFirst: true)
@@ -170,15 +192,14 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    // Login tetikleyici
     private func doLogin() async {
-        focusedField = nil // Klavyeyi kapatmak için focus'u sıfırlıyoruz.
+        voiceManager.stopListening() // Manuel girişe basılırsa mikrofonu kapat
+        focusedField = nil
         if await vm.login(tc: tc, password: password) {
             withAnimation { pushHome = true }
         }
     }
 }
-
 #Preview {
     ContentView()
 }
