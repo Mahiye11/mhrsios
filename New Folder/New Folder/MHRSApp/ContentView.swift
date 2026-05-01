@@ -16,13 +16,13 @@ struct ContentView: View {
 
     @StateObject private var vm = LoginViewModel()
     @StateObject private var voiceManager = VoiceManager()
-    @State private var shouldRecordChallenge = false
     
     @FocusState private var focusedField: Field?
 
     @State private var isPasswordVisible = false
     @State private var challengeCode = ""
-
+    
+    
     enum Field { case tc, password }
 
     var body: some View {
@@ -136,6 +136,12 @@ struct ContentView: View {
                                 .easeInOut(duration: 0.5).repeatForever(autoreverses: true),
                                 value: voiceManager.isListening
                             )
+                        if !challengeCode.isEmpty {
+                            Text(challengeCode)
+                                .font(.system(size: 40, weight: .bold))
+                                .tracking(10) // aralıklı gösterir
+                                .padding(.top, 10)
+                        }
                             
                     }
                     .padding(.top, 12)
@@ -185,12 +191,7 @@ struct ContentView: View {
                     }
                 }
 
-                voiceManager.onSpeakFinished = {
-                    if shouldRecordChallenge {
-                        shouldRecordChallenge = false
-                        voiceManager.startRecordingVoiceForLogin()
-                    }
-                }
+                
             }
         }
     }
@@ -205,7 +206,6 @@ struct ContentView: View {
             }
         }
     }
-
     private func sendVoiceTCToBackend(audioURL: URL) async {
         do {
             var request = URLRequest(url: APIConfig.recognizeTcURL)
@@ -233,25 +233,24 @@ struct ContentView: View {
             }
 
             guard 200..<300 ~= httpResponse.statusCode else {
-                let message = String(data: data, encoding: .utf8) ?? "Ses tanınamadı."
+                let message = String(data: data, encoding: .utf8) ?? "TC tanınamadı."
                 vm.error = message
                 return
             }
-
             let result = try JSONDecoder().decode(TCResponse.self, from: data)
             self.tc = result.tcKimlik
 
             self.challengeCode = String(Int.random(in: 1000...9999))
-            self.shouldRecordChallenge = true
 
-            voiceManager.speak("\(challengeCode) kodunu sesli olarak tekrar edin")
-
+            let spaced = challengeCode.map { String($0) }.joined(separator: " ")
+            voiceManager.speak("\(spaced) kodunu tek tek söyleyerek tekrar edin")
+            
             DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
                 voiceManager.startRecordingVoiceForLogin()
             }
 
         } catch {
-            vm.error = "Sesli giriş hatası: \(error.localizedDescription)"
+            vm.error = "Sesli TC hatası: \(error.localizedDescription)"
         }
     }
     private func sendVoiceLoginToBackend(audioURL: URL) async {
@@ -296,10 +295,14 @@ struct ContentView: View {
                 vm.error = message
                 return
             }
-
+            let result = try JSONDecoder().decode(LoginResponse.self, from: data)
+            vm.userId = result.userId
+            vm.userName = result.name
+            
             withAnimation {
                 pushHome = true
             }
+            
 
         } catch {
             vm.error = "Sesli giriş hatası: \(error.localizedDescription)"

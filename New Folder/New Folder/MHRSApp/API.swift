@@ -17,6 +17,9 @@ enum APIConfig {
     static func userDetailURL(userId: Int) -> URL {
         URL(string: "\(baseURL)/api/users/\(userId)")!
     }
+    static var registerVoiceURL: URL {
+        URL(string: "\(baseURL)/api/users/register-voice")!
+    }
     
 }
 /*import Foundation

@@ -24,7 +24,15 @@ struct UyeOlView: View {
         case ad, soyad, tc, sifre
     }
 
+    enum RegisterMode {
+        case manual
+        case voice
+    }
+
     @FocusState private var focused: Field?
+
+    @State private var registerMode: RegisterMode? = nil
+    @StateObject private var voiceRegisterVM = VoiceRegisterManager()
 
     @State private var ad = ""
     @State private var soyad = ""
@@ -38,8 +46,8 @@ struct UyeOlView: View {
     @State private var showAlert = false
     @State private var wasSuccess = false
 
-    private let cinsiyetOptions = ["Kadın", "Erkek"]
-
+    @StateObject private var modeVoiceVM = RegisterModeVoiceManager()
+    
     private var canSubmit: Bool {
         !ad.trimmingCharacters(in: .whitespaces).isEmpty &&
         !soyad.trimmingCharacters(in: .whitespaces).isEmpty &&
@@ -52,9 +60,76 @@ struct UyeOlView: View {
     }
 
     var body: some View {
+        Group {
+            if registerMode == nil {
+                registerModeSelectionView
+            } else if registerMode == .manual {
+                manualRegisterView
+            } else {
+                voiceRegisterView
+            }
+        }
+        .navigationTitle("Üye Ol")
+        .alert("Bilgi", isPresented: $showAlert) {
+            Button("Tamam") {
+                if wasSuccess {
+                    dismiss()
+                }
+            }
+        } message: {
+            Text(alertMsg)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Kapat") {
+                    focused = nil
+                }
+            }
+        }
+    }
+    private var registerModeSelectionView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "person.badge.plus")
+
+            Text("Nasıl kayıt olmak istersiniz?")
+
+            Button {
+                registerMode = .manual
+            } label: {
+                Text("Manuel Kayıt")
+            }
+
+            Button {
+                registerMode = .voice
+                voiceRegisterVM.startVoiceRegister()
+            } label: {
+                Text("Sesli Kayıt")
+            }
+
+            Spacer()
+        }
+        .padding()
+
+        // 👇 TAM BURAYA EKLE
+        .onAppear {
+            modeVoiceVM.onManualSelected = {
+                registerMode = .manual
+            }
+
+            modeVoiceVM.onVoiceSelected = {
+                registerMode = .voice
+                voiceRegisterVM.startVoiceRegister()
+            }
+
+            modeVoiceVM.start()
+        }
+    }
+    private var manualRegisterView: some View {
         ScrollView {
             VStack(spacing: 20) {
-
                 SectionView(title: "Kimlik Bilgileri", color: Color(red: 0.22, green: 0.62, blue: 0.95)) {
                     TextField("Ad", text: $ad)
                         .textFieldStyle(.roundedBorder)
@@ -130,32 +205,72 @@ struct UyeOlView: View {
                 .foregroundColor(.white)
                 .font(.headline)
                 .cornerRadius(18)
-                .shadow(color: canSubmit ? Color.blue.opacity(0.25) : .clear, radius: 8, x: 0, y: 5)
                 .disabled(!canSubmit)
                 .padding(.horizontal, 22)
             }
             .padding(.vertical, 10)
         }
-        .navigationTitle("Üye Ol")
-        .alert("Bilgi", isPresented: $showAlert) {
-            Button("Tamam") {
-                if wasSuccess {
-                    dismiss()
-                }
-            }
-        } message: {
-            Text(alertMsg)
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Kapat") {
-                    focused = nil
-                }
-            }
-        }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: focused == nil ? 0 : 70)
+        }
+    }
+
+    private var voiceRegisterView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: voiceRegisterVM.isRecording ? "waveform.circle.fill" : "mic.circle.fill")
+                .font(.system(size: 95))
+                .foregroundColor(voiceRegisterVM.isRecording ? .red : .blue)
+
+            Text(voiceRegisterVM.stepText)
+                .font(.title3.bold())
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            if voiceRegisterVM.isListening {
+                Text("Dinleniyor...")
+                    .foregroundColor(.red)
+                    .fontWeight(.semibold)
+            }
+
+            if voiceRegisterVM.isRecording {
+                Text("Ses kaydı alınıyor...")
+                    .foregroundColor(.red)
+                    .fontWeight(.semibold)
+            }
+
+            Text("Alınan ses kaydı: \(voiceRegisterVM.sampleCount)/3")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+
+            Button {
+                registerMode = nil
+            } label: {
+                Text("Geri")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .background(Color.gray.opacity(0.25), in: RoundedRectangle(cornerRadius: 16))
+            .foregroundColor(.black)
+            .padding(.horizontal, 30)
+
+            Spacer()
+        }
+        .padding()
+        .onAppear {
+            voiceRegisterVM.onFinished = {
+                wasSuccess = true
+                alertMsg = "Sesli kayıt başarılı. Giriş yapabilirsiniz."
+                showAlert = true
+            }
+
+            voiceRegisterVM.onError = { message in
+                wasSuccess = false
+                alertMsg = message
+                showAlert = true
+            }
         }
     }
 
@@ -202,20 +317,12 @@ struct UyeOlView: View {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw NSError(
-                domain: "API",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Sunucu cevabı okunamadı."]
-            )
+            throw NSError(domain: "API", code: -1, userInfo: [NSLocalizedDescriptionKey: "Sunucu cevabı okunamadı."])
         }
 
         guard 200..<300 ~= httpResponse.statusCode else {
             let msg = String(data: data, encoding: .utf8) ?? "Kayıt başarısız."
-            throw NSError(
-                domain: "API",
-                code: httpResponse.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: msg]
-            )
+            throw NSError(domain: "API", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
         }
 
         return try JSONDecoder().decode(RegisterResponse.self, from: data)
