@@ -1,4 +1,4 @@
-import SwiftUI
+/*import SwiftUI
 import Foundation
 
 struct PatientCreate: Codable {
@@ -197,3 +197,4 @@ struct SectionView<Content: View>: View {
         .padding(.horizontal, 20)
     }
 }
+*/

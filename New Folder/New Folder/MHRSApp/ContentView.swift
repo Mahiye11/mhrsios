@@ -1,23 +1,27 @@
 import SwiftUI
+
 enum AppLang: String, CaseIterable, Identifiable {
     case tr = "Türkçe"
     case en = "English"
+
     var id: String { rawValue }
 }
 
-// MARK: - View
 struct ContentView: View {
     @State private var lang: AppLang = .tr
     @State private var tc = ""
     @State private var password = ""
     @State private var pushHome = false
     @State private var pushSignup = false
+
     @StateObject private var vm = LoginViewModel()
-    @FocusState private var focusedField: Field?
-    @State private var isPasswordVisible = false
-    
-    // SES YÖNETİCİSİ
     @StateObject private var voiceManager = VoiceManager()
+    @State private var shouldRecordChallenge = false
+    
+    @FocusState private var focusedField: Field?
+
+    @State private var isPasswordVisible = false
+    @State private var challengeCode = ""
 
     enum Field { case tc, password }
 
@@ -25,9 +29,9 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    
+
                     VStack(spacing: 8) {
-                        Image("IMG_8420") // Assets'e koyduğun resmin adı
+                        Image("IMG_8420")
                             .resizable()
                             .scaledToFit()
                             .frame(width: 90, height: 90)
@@ -41,7 +45,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.top, 8)
-                    // TC
+
                     HStack {
                         Image(systemName: "person.fill")
                             .foregroundStyle(.blue)
@@ -57,10 +61,8 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 12).strokeBorder(Color.blue.opacity(0.4))
                     )
                     .frame(width: 300)
-                    .focused($focusedField, equals: .tc)
                     .onSubmit { focusedField = .password }
 
-                    // Şifre
                     HStack {
                         Image(systemName: "lock.fill")
                             .foregroundStyle(.blue)
@@ -88,7 +90,7 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 12).strokeBorder(Color.blue.opacity(0.4))
                     )
                     .frame(width: 300)
-                    //Giriş
+
                     HStack(spacing: 16) {
                         Button {
                             Task { await doLogin() }
@@ -106,7 +108,7 @@ struct ContentView: View {
                         .disabled(vm.isLoading)
 
                         NavigationLink {
-                            UyeOlView()
+                            // UyeOlView()
                         } label: {
                             Text("Üye Ol")
                                 .fontWeight(.semibold)
@@ -118,37 +120,36 @@ struct ContentView: View {
                         .foregroundStyle(.white)
                     }
 
-                    // Sesli komut alanı
                     VStack(spacing: 12) {
                         Text("Sesli komutla devam etmek ister misiniz?")
                             .font(.callout)
                             .foregroundStyle(.secondary)
 
-    
                         Image(systemName: "waveform")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 90, height: 90)
-                                .padding(.top, 4)
-                           
-                                .foregroundStyle(voiceManager.isListening ? Color.red : Color.blue)
-                                .scaleEffect(voiceManager.isListening ? 1.1 : 1.0)
-                                .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: voiceManager.isListening)
-                        
-
-                        
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 90, height: 90)
+                            .padding(.top, 4)
+                            .foregroundStyle(voiceManager.isListening ? Color.red : Color.blue)
+                            .scaleEffect(voiceManager.isListening ? 1.1 : 1.0)
+                            .animation(
+                                .easeInOut(duration: 0.5).repeatForever(autoreverses: true),
+                                value: voiceManager.isListening
+                            )
+                            
                     }
                     .padding(.top, 12)
                 }
                 .padding(20)
             }
-            .navigationDestination(isPresented: $pushHome) {  AnaSayfa()  }
-            .navigationDestination(isPresented: $pushSignup) { UyeOlView()  }
-            .alert("Hata", isPresented: .constant(vm.error != nil), actions: {
+            .navigationDestination(isPresented: $pushHome) {
+                AnaSayfa()
+            }
+            .alert("Hata", isPresented: .constant(vm.error != nil)) {
                 Button("Tamam") { vm.error = nil }
-            }, message: {
+            } message: {
                 Text(vm.error ?? "")
-            })
+            }
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
@@ -158,40 +159,148 @@ struct ContentView: View {
                     }
                 }
             }
-            // MARK: - Sesli Asistan Entegrasyonu
             .onAppear {
-                // View açıldığında callbackleri tanımla ve asistanı başlat
-                voiceManager.onTCDidChange = { spokenTC in
-                    self.tc = spokenTC
-                }
-                voiceManager.onPasswordDidChange = { spokenPassword in
-                    self.password = spokenPassword
-                }
-                voiceManager.onLoginTrigger = {
-                    Task { await doLogin() }
-                }
-                
-                // Biraz gecikmeli başlatmak UX açısından daha iyidir
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     voiceManager.startInitialFlow()
                 }
-            }
-            .onDisappear {
-                // Ekrandan çıkarken mikrofonu kapat
-                voiceManager.stopListening()
+
+                voiceManager.onVoiceTCRecorded = { audioURL in
+                    Task {
+                        await sendVoiceTCToBackend(audioURL: audioURL)
+                    }
+                }
+
+                voiceManager.onVoiceLoginRecorded = { audioURL in
+                    Task {
+                        await sendVoiceLoginToBackend(audioURL: audioURL)
+                    }
+                }
+
+                voiceManager.onSpeakFinished = {
+                    if shouldRecordChallenge {
+                        shouldRecordChallenge = false
+                        voiceManager.startRecordingVoiceForLogin()
+                    }
+                }
             }
         }
     }
 
-   
     private func doLogin() async {
-        voiceManager.stopListening() // Manuel girişe basılırsa mikrofonu kapat
+        voiceManager.stopListening()
         focusedField = nil
+
         if await vm.login(tc: tc, password: password) {
-            withAnimation { pushHome = true }
+            withAnimation {
+                pushHome = true
+            }
+        }
+    }
+
+    private func sendVoiceTCToBackend(audioURL: URL) async {
+        do {
+            var request = URLRequest(url: APIConfig.recognizeTcURL)
+            request.httpMethod = "POST"
+
+            let boundary = UUID().uuidString
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+            let audioData = try Data(contentsOf: audioURL)
+
+            var body = Data()
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"tc.wav\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+            body.append(audioData)
+            body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+            request.httpBody = body
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                vm.error = "Sunucu cevabı alınamadı."
+                return
+            }
+
+            guard 200..<300 ~= httpResponse.statusCode else {
+                let message = String(data: data, encoding: .utf8) ?? "Ses tanınamadı."
+                vm.error = message
+                return
+            }
+
+            let result = try JSONDecoder().decode(TCResponse.self, from: data)
+            self.tc = result.tcKimlik
+
+            self.challengeCode = String(Int.random(in: 1000...9999))
+
+            voiceManager.speak("\(challengeCode) kodunu sesli olarak tekrar edin")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+                voiceManager.startRecordingVoiceForLogin()
+            }
+
+        } catch {
+            vm.error = "Sesli giriş hatası: \(error.localizedDescription)"
+        }
+    }
+    private func sendVoiceLoginToBackend(audioURL: URL) async {
+        do {
+            var request = URLRequest(url: APIConfig.voiceLoginURL)
+            request.httpMethod = "POST"
+
+            let boundary = UUID().uuidString
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+            let audioData = try Data(contentsOf: audioURL)
+
+            var body = Data()
+
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"voice_login.wav\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+            body.append(audioData)
+            body.append("\r\n".data(using: .utf8)!)
+
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"tcKimlik\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(tc)\r\n".data(using: .utf8)!)
+
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"challengeCode\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(challengeCode)\r\n".data(using: .utf8)!)
+
+            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+            request.httpBody = body
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                vm.error = "Sunucu cevabı alınamadı."
+                return
+            }
+
+            guard 200..<300 ~= httpResponse.statusCode else {
+                let message = String(data: data, encoding: .utf8) ?? "Ses doğrulama başarısız."
+                vm.error = message
+                return
+            }
+
+            withAnimation {
+                pushHome = true
+            }
+
+        } catch {
+            vm.error = "Sesli giriş hatası: \(error.localizedDescription)"
         }
     }
 }
+
+struct TCResponse: Codable {
+    let tcKimlik: String
+}
+
 #Preview {
     ContentView()
 }

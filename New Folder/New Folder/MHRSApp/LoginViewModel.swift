@@ -1,46 +1,60 @@
-import SwiftUI
 import Foundation
+
+struct LoginResponse: Codable {
+    let message: String?
+    let userId: Int?
+    let name: String?
+    let tcKimlik: String?
+    let authMethod: String?
+    let hasVoiceRecord: Bool?
+}
 
 @MainActor
 final class LoginViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
-
-    
-    @AppStorage("user_id") private var userId: Int = 0
-    @AppStorage("user_name") private var userName: String = ""
+    @Published var userName: String?
+    @Published var userId: Int?
 
     func login(tc: String, password: String) async -> Bool {
-        error = nil
-
-        
-        guard Self.isValidTCKN(tc) else {
-            error = "TC Kimlik numarası 11 haneli olmalı."
-            return false
-        }
-        guard !password.isEmpty else {
-            error = "Şifre boş olamaz."
-            return false
-        }
-
         isLoading = true
+        error = nil
         defer { isLoading = false }
 
         do {
-            let resp = try await API.login(tc: tc, password: password)
-        
-            userId = resp.user_id
-            userName = "\(resp.ad) \(resp.soyad)"
+            var request = URLRequest(url: APIConfig.loginURL)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: String] = [
+                "tcKimlik": tc,
+                "password": password
+            ]
+
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                error = "Sunucu cevabı okunamadı."
+                return false
+            }
+
+            guard 200..<300 ~= httpResponse.statusCode else {
+                let message = String(data: data, encoding: .utf8) ?? "Giriş başarısız."
+                error = message
+                return false
+            }
+
+            let result = try JSONDecoder().decode(LoginResponse.self, from: data)
+            self.userId = result.userId
+            self.userName = result.name
+
             return true
+
         } catch {
-            self.error = (error as NSError).localizedDescription
+            self.error = "Bağlantı hatası: \(error.localizedDescription)"
             return false
         }
-    }
-
-    private static func isValidTCKN(_ s: String) -> Bool {
-        let digits = s.trimmingCharacters(in: .whitespaces)
-        let re = try! NSRegularExpression(pattern: #"^\d{11}$"#)
-        return re.firstMatch(in: digits, range: NSRange(location: 0, length: digits.utf16.count)) != nil
     }
 }

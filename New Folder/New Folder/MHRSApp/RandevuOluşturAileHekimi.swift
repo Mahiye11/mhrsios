@@ -1,4 +1,4 @@
-import SwiftUI
+/*import SwiftUI
 
 struct RandevuOluşturAileHekimiView: View {
     @Environment(\.dismiss) var dismiss
@@ -115,3 +115,4 @@ struct RandevuOluşturAileHekimiView: View {
         }
     }
 }
+*/

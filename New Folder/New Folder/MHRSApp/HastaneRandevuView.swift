@@ -1,4 +1,4 @@
-import SwiftUI
+/*import SwiftUI
 
 // MARK: - DTO'lar (DB şemanla birebir aynı isimler)
 struct IlDTO: Identifiable, Decodable, Hashable {
@@ -184,3 +184,4 @@ struct HastaneRandevuView: View {
 }
 
 #Preview { HastaneRandevuView() }
+*/

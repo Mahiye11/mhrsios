@@ -37,7 +37,7 @@ struct AnaSayfa: View {
     var body: some View {
         VStack {
             // Navigasyon Bağlantısı (voiceVM buraya da aktarılabilir)
-            NavigationLink(destination: Text("Hastane Randevu Sayfası"), isActive: $pushToHastane) { EmptyView() }
+            //NavigationLink(destination: Text("Hastane Randevu Sayfası"), isActive: $pushToHastane) { EmptyView() }
             
             ScrollView {
                 VStack(spacing: 20) {
@@ -92,15 +92,15 @@ struct AnaSayfa: View {
         .navigationBarItems(trailing: Text("ZEYNEP BAYRAM").font(.subheadline).foregroundColor(.gray))
         .sheet(isPresented: $showAileHekimiSheet) {
             // VoiceManager'ı alt sayfaya aktarıyoruz
-            AileHekimiRandevuView(voiceVM: voiceVM)
+          //  AileHekimiRandevuView(voiceVM: voiceVM)
         }
         .onAppear {
             // Sayfa açıldığında senaryoyu başlat
-            runAssistantScenario()
+           // runAssistantScenario()
         }
     }
 
-    // MARK: - Sesli Senaryo Akışı
+  /*  // MARK: - Sesli Senaryo Akışı
     private func runAssistantScenario() {
         let dinamikMesaj = tumRandevulariSeslendir()
         currentStep = .initial
@@ -164,4 +164,6 @@ struct AnaSayfa: View {
         mesaj += "Yeni bir randevu oluşturmak ister misiniz?"
         return mesaj
     }
+   */
 }
+

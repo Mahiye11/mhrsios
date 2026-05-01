@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct AileHekimiRandevuView: View {
+/*struct AileHekimiRandevuView: View {
     @State private var showRandevuView = false
     @Environment(\.dismiss) var dismiss
     // ÖNEMLİ: @StateObject değil @ObservedObject kullanıyoruz ki önceki sayfadaki "Evet" tercihi buraya gelsin.
@@ -92,3 +92,4 @@ struct AileHekimiRandevuView: View {
         }
     }
 }
+*/

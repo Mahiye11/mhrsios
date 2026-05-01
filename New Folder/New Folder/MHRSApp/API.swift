@@ -1,13 +1,40 @@
 import Foundation
 
 enum APIConfig {
-    static let host = "127.0.0.1"
-    static let hospitalsPort = 8001
-    static let usersPort     = 8001
-    static let prefix        = "/api/v0" // FastAPI
-    static let timeout: TimeInterval = 20
-}
+    static let baseURL = "http://192.168.1.158:5050"
+    static var loginURL: URL {
+        URL(string: "\(baseURL)/api/users/login")!
+    }
 
+    static var recognizeTcURL: URL {
+        URL(string: "\(baseURL)/api/users/recognize-tc")!
+    }
+
+    static var voiceLoginURL: URL {
+        URL(string: "\(baseURL)/api/users/login-voice")!
+    }
+
+    static var registerURL: URL {
+        URL(string: "\(baseURL)/api/users/register")!
+    }
+}
+/*import Foundation
+
+enum APIConfig {
+    static let host = "192.168.1.158"
+    static let usersPort = 5061
+    static let hospitalsPort = 5061
+    static let timeout: TimeInterval = 30
+    static let prefix = "/api/v0"
+
+    static var baseURL: String {
+        "http://\(host):\(usersPort)"
+    }
+
+    static var voiceAnalyzeURL: URL {
+        URL(string: "\(baseURL)/analyze")!
+    }
+}
 enum API {
     enum Failure: Error { case invalidResponse(Int), decoding(Error) }
 
@@ -113,4 +140,4 @@ enum API {
         )
     }
 }
-
+*/

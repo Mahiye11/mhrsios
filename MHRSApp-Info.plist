@@ -2,7 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleIdentifier</key>
-	<string></string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Sesli komutlarınızı anlayıp size yardımcı olabilmek için konuşma tanıma iznine ihtiyacımız var.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Sesli giriş yapabilmeniz ve asistanla konuşabilmeniz için mikrofon erişimine ihtiyacımız var.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
 </dict>
 </plist>

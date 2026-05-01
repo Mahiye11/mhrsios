@@ -3,175 +3,246 @@ import Speech
 import AVFoundation
 
 enum VoiceState {
-    case idle, askingPermission, listeningForPermission, askingTC, listeningForTC, askingPassword, listeningForPassword, assistantFlow, finished
+    case idle
+    case askingPermission
+    case listeningForPermission
+    case askingTC
 }
 
 class VoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+
     @Published var isListening = false
-    @Published var recognizedText = ""
-    @Published var isVoiceModeActive = false
-    
-    var onTCDidChange: ((String) -> Void)?
-    var onPasswordDidChange: ((String) -> Void)?
-    var onLoginTrigger: (() -> Void)?
-    
-    // Ana Sayfa için yeni geri çağrımlar
-    var onSpeechFinished: (() -> Void)?
-    var onCommandRecognized: ((String) -> Void)?
-    
+
+    var onVoiceTCRecorded: ((URL) -> Void)?
+    var onVoiceLoginRecorded: ((URL) -> Void)?
+    var onManualLoginSelected: (() -> Void)?
+    var onSpeakFinished: (() -> Void)?
+
     private var currentState: VoiceState = .idle
+
     private let speechSynthesizer = AVSpeechSynthesizer()
-    private let assistantSynthesizer = AVSpeechSynthesizer() // Ana sayfa için ayrı
-    
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "tr-TR"))
+
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private let audioEngine = AVAudioEngine()
-    private var silenceTimer: Timer?
-    private var assistantCompletion: (() -> Void)?
+
+    private var audioRecorder: AVAudioRecorder?
+    private var recordedAudioURL: URL?
+    private var recordTimer: Timer?
 
     override init() {
         super.init()
         speechSynthesizer.delegate = self
-        assistantSynthesizer.delegate = self
         requestPermissions()
     }
-    
+
     private func requestPermissions() {
         SFSpeechRecognizer.requestAuthorization { _ in }
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            print("Mic izin:", granted)
+        }
     }
-    
-    // --- LOGIN AKIŞI ---
+
     func startInitialFlow() {
         currentState = .askingPermission
-        speak(text: "Sesli komutla ilerlemek ister misiniz?")
+        speak("Sesli komutla devam etmek ister misiniz?")
     }
-    
-    func speak(text: String) {
+
+    func speak(_ text: String) {
+        stopListening()
+
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .duckOthers])
+        try? audioSession.setActive(true)
+
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "tr-TR")
-        utterance.rate = 0.5
         speechSynthesizer.speak(utterance)
     }
 
-    // --- ANA SAYFA AKIŞI ---
-    func speakAndThen(_ text: String, completion: (() -> Void)? = nil) {
-        currentState = .assistantFlow
-        self.assistantCompletion = completion
-        
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "tr-TR")
-        utterance.rate = 0.5
-        assistantSynthesizer.speak(utterance)
-    }
-
-    // ORTAK DELEGATE (Hangi synthesizer biterse buraya düşer)
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        DispatchQueue.main.async {
-            if synthesizer == self.assistantSynthesizer {
-                self.assistantCompletion?()
-                self.onSpeechFinished?() // View'daki bloğu tetikler
-            } else {
-                // Login Akışı Kontrolü
-                switch self.currentState {
-                case .askingPermission:
-                    self.currentState = .listeningForPermission
-                    self.startListening()
-                case .askingTC:
-                    self.currentState = .listeningForTC
-                    self.startListening()
-                case .askingPassword:
-                    self.currentState = .listeningForPassword
-                    self.startListening()
-                default: break
-                }
+        switch currentState {
+
+        case .askingPermission:
+            currentState = .listeningForPermission
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                self.startListening()
             }
+
+        case .askingTC:
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.startRecordingTCVoice()
+            }
+
+        default:
+            onSpeakFinished?()
         }
     }
-    // --- ANA SAYFA VE RANDEVU AKIŞI İÇİN ---
-    // Bu metod senin kodundaki speakAndThen ile aynı mantıkta çalışır.
-    func assistantSpeak(text: String, completion: (() -> Void)? = nil) {
-        // Mevcut akışı durdur (varsa)
-        assistantSynthesizer.stopSpeaking(at: .immediate)
-        
-        currentState = .assistantFlow
-        self.assistantCompletion = completion
-        
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "tr-TR")
-        utterance.rate = 0.5
-        
-        // Senin tanımladığın assistantSynthesizer'ı kullanıyoruz
-        assistantSynthesizer.speak(utterance)
-    }
 
-    // --- DİNLEME MANTIĞI ---
     func startListening() {
-        guard !audioEngine.isRunning else { return }
-        
-        recognitionTask?.cancel()
+        stopListening()
+
         let audioSession = AVAudioSession.sharedInstance()
-        try? audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
-        try? audioSession.setActive(true)
-        
+
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .duckOthers])
+            try audioSession.setActive(true)
+        } catch {
+            print("AudioSession hatası:", error.localizedDescription)
+            return
+        }
+
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        guard let recognitionRequest = recognitionRequest else { return }
+
+        recognitionRequest.shouldReportPartialResults = true
+
         let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        
+        let recordingFormat = inputNode.inputFormat(forBus: 0)
+
+        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+            print("Mikrofon formatı geçersiz.")
+            return
+        }
+
         inputNode.removeTap(onBus: 0)
+
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
             self.recognitionRequest?.append(buffer)
         }
-        
+
         audioEngine.prepare()
-        try? audioEngine.start()
-        isListening = true
-        
-        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest!) { result, error in
+
+        do {
+            try audioEngine.start()
+            isListening = true
+        } catch {
+            print("AudioEngine başlatılamadı:", error.localizedDescription)
+        }
+
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { result, error in
             if let result = result {
                 let text = result.bestTranscription.formattedString.lowercased()
+                print("🎤 ALGILANAN:", text)
                 self.handleRecognizedText(text)
             }
-            if error != nil { self.stopListening() }
+
+            if error != nil {
+                self.stopListening()
+            }
         }
     }
-    
+
     func stopListening() {
-        audioEngine.stop()
+        recordTimer?.invalidate()
+        recordTimer = nil
+
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
+
+        recognitionRequest = nil
+        recognitionTask?.cancel()
+        recognitionTask = nil
+
         isListening = false
     }
 
+    func startRecordingTCVoice() {
+        stopListening()
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tc.wav")
+        recordedAudioURL = url
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1
+        ]
+
+        do {
+            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+            audioRecorder?.record()
+            isListening = true
+
+            recordTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { _ in
+                self.stopRecordingTCVoice()
+            }
+        } catch {
+            print("TC ses kaydı başlatılamadı:", error.localizedDescription)
+        }
+    }
+
+    func stopRecordingTCVoice() {
+        recordTimer?.invalidate()
+        recordTimer = nil
+
+        audioRecorder?.stop()
+        isListening = false
+
+        if let url = recordedAudioURL {
+            onVoiceTCRecorded?(url)
+        }
+    }
+
+    func startRecordingVoiceForLogin() {
+        stopListening()
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("login.wav")
+        recordedAudioURL = url
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1
+        ]
+
+        do {
+            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+            audioRecorder?.record()
+            isListening = true
+
+            recordTimer = Timer.scheduledTimer(withTimeInterval: 6, repeats: false) { _ in
+                self.stopRecordingVoiceForLogin()
+            }
+        } catch {
+            print("Login ses kaydı başlatılamadı:", error.localizedDescription)
+        }
+    }
+
+    func stopRecordingVoiceForLogin() {
+        recordTimer?.invalidate()
+        recordTimer = nil
+
+        audioRecorder?.stop()
+        isListening = false
+
+        if let url = recordedAudioURL {
+            onVoiceLoginRecorded?(url)
+        }
+    }
+
     private func handleRecognizedText(_ text: String) {
-        // Ana sayfa komutlarını her zaman dışarıya bildir
-        self.onCommandRecognized?(text)
-        
         switch currentState {
+
         case .listeningForPermission:
             if text.contains("evet") {
-                self.isVoiceModeActive = true // Sesli modu aktifleştir
                 stopListening()
                 currentState = .askingTC
-                speak(text: "Lütfen T.C. kimlik numaranızı söyleyin.")
-            }
-        case .listeningForTC:
-            let digits = text.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-            if digits.count >= 11 {
+                speak("TC kimlik numaranızı söyleyin")
+            } else if text.contains("hayır") || text.contains("hayir") {
                 stopListening()
-                onTCDidChange?(String(digits.prefix(11)))
-                currentState = .askingPassword
-                speak(text: "Lütfen şifrenizi söyleyin.")
+                currentState = .idle
+                speak("Manuel giriş yapabilirsiniz")
+                onManualLoginSelected?()
             }
-        case .listeningForPassword:
-            let password = text.replacingOccurrences(of: " ", with: "")
-            onPasswordDidChange?(password)
-            silenceTimer?.invalidate()
-            silenceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
-                self.stopListening()
-                self.onLoginTrigger?()
-            }
-        default: break
+
+        default:
+            break
         }
     }
 }

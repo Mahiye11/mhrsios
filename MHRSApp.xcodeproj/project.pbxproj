@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		9D2EF9FD2E46369500E9C10E /* SQLite in Frameworks */ = {isa = PBXBuildFile; productRef = 9D2EF9FC2E46369500E9C10E /* SQLite */; };
-		9DC8EF332E5875710045F5F5 /* MHRSApp-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9DC8EF322E5875710045F5F5 /* MHRSApp-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -226,7 +225,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9DC8EF332E5875710045F5F5 /* MHRSApp-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -416,9 +414,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ses analizi için mikrofon erişimi gerekiyor.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Bu uygulama, sesli komutlarınızı metne dönüştürmek için konuşma tanıma servisine ihtiyaç duyar.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Mikrofon erişimi sesli komut için gereklidir.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sesli komutları algılamak için kullanılır.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -449,9 +446,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ses analizi için mikrofon erişimi gerekiyor.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Bu uygulama, sesli komutlarınızı metne dönüştürmek için konuşma tanıma servisine ihtiyaç duyar.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Mikrofon erişimi sesli komut için gereklidir.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sesli komutları algılamak için kullanılır.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
