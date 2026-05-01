@@ -1,39 +1,36 @@
-/*import SwiftUI
+import SwiftUI
 import Foundation
 
-struct PatientCreate: Codable {
-    let ad: String
-    let soyad: String
-    let tc_kimlik: String
-    let sifre: String
-    let email: String
-    let dogum_tarihi: String
+struct RegisterRequest: Codable {
+    let name: String
+    let surname: String
+    let tcKimlik: String
+    let password: String
+    let cinsiyet: String
+    let dogumTarihi: String
 }
 
-struct PatientDTO: Identifiable, Codable {
-    let id: Int
-    let ad: String
-    let soyad: String
-    let tc_kimlik: String
-    let email: String
-    let dogum_tarihi: String
-    let created_at: String?
+struct RegisterResponse: Codable {
+    let message: String?
+    let userId: Int?
+    let tcKimlik: String?
+    let name: String?
 }
-
 
 struct UyeOlView: View {
     @Environment(\.dismiss) private var dismiss
 
     enum Field: Hashable {
-        case ad, soyad, tc, email, sifre
+        case ad, soyad, tc, sifre
     }
+
     @FocusState private var focused: Field?
 
     @State private var ad = ""
     @State private var soyad = ""
     @State private var tc = ""
-    @State private var email = ""
     @State private var sifre = ""
+    @State private var cinsiyet = ""
     @State private var dogumTarihi = Calendar.current.date(from: DateComponents(year: 1995, month: 1, day: 1)) ?? Date()
 
     @State private var isLoading = false
@@ -41,20 +38,26 @@ struct UyeOlView: View {
     @State private var showAlert = false
     @State private var wasSuccess = false
 
+    private let cinsiyetOptions = ["Kadın", "Erkek"]
+
     private var canSubmit: Bool {
         !ad.trimmingCharacters(in: .whitespaces).isEmpty &&
         !soyad.trimmingCharacters(in: .whitespaces).isEmpty &&
-        tc.count == 11 && tc.allSatisfy(\.isNumber) &&
-        !email.isEmpty && !sifre.isEmpty &&
+        tc.count == 11 &&
+        tc.allSatisfy(\.isNumber) &&
+        sifre.count == 4 &&
+        sifre.allSatisfy(\.isNumber) &&
+        !cinsiyet.isEmpty &&
         !isLoading
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                SectionView(title: "Kimlik Bilgileri") {
+
+                SectionView(title: "Kimlik Bilgileri", color: Color(red: 0.22, green: 0.62, blue: 0.95)) {
                     TextField("Ad", text: $ad)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .textFieldStyle(.roundedBorder)
                         .textContentType(.givenName)
                         .autocorrectionDisabled()
                         .focused($focused, equals: .ad)
@@ -62,65 +65,83 @@ struct UyeOlView: View {
                         .onSubmit { focused = .soyad }
 
                     TextField("Soyad", text: $soyad)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .textFieldStyle(.roundedBorder)
                         .textContentType(.familyName)
                         .autocorrectionDisabled()
                         .focused($focused, equals: .soyad)
                         .submitLabel(.next)
                         .onSubmit { focused = .tc }
 
-                    TextField("T.C. Kimlik (11 hane)", text: $tc)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    TextField("T.C. Kimlik No", text: $tc)
+                        .textFieldStyle(.roundedBorder)
                         .keyboardType(.numberPad)
+                        .focused($focused, equals: .tc)
                         .onChange(of: tc) {
                             tc = String(tc.filter(\.isNumber).prefix(11))
                         }
-                        .focused($focused, equals: .tc)
-                        .submitLabel(.next)
-                        .onSubmit { focused = .email }
-                    
+
                     DatePicker("Doğum Tarihi", selection: $dogumTarihi, displayedComponents: .date)
                         .padding(.vertical, 8)
+
+                    Picker(selection: $cinsiyet) {
+                        Text("Cinsiyet Seçin").tag("")
+                        Text("Kadın").tag("Kadın")
+                        Text("Erkek").tag("Erkek")
+                    } label: {
+                        HStack {
+                            Text(cinsiyet.isEmpty ? "Cinsiyet Seçin" : cinsiyet)
+                                .foregroundColor(.black)
+
+                            Spacer()
+
+                            Image(systemName: "chevron.down")
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .padding()
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
                 }
 
-                SectionView(title: "Hesap Bilgileri") {
-                    TextField("E-posta", text: $email)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .keyboardType(.emailAddress)
-                        .textContentType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .focused($focused, equals: .email)
-                        .submitLabel(.next)
-                        .onSubmit { focused = .sifre }
-
-                    SecureField("Şifre", text: $sifre)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .textContentType(.newPassword)
+                SectionView(title: "Hesap Bilgileri", color: Color(red: 0.22, green: 0.62, blue: 0.95)) {
+                    TextField("Dört Haneli PIN", text: $sifre)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
                         .focused($focused, equals: .sifre)
-                        .submitLabel(.done)
-                        .onSubmit { focused = nil }
+                        .onChange(of: sifre) {
+                            sifre = String(sifre.filter(\.isNumber).prefix(4))
+                        }
                 }
 
                 Button {
                     Task { await submit() }
                 } label: {
-                    if isLoading { ProgressView().tint(.white) }
-                    else { Text("Kayıt Ol").fontWeight(.semibold) }
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Kayıt Ol")
+                            .fontWeight(.semibold)
+                    }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.blue)
+                .padding(.vertical, 16)
+                .background(canSubmit ? Color.blue : Color.gray.opacity(0.45))
                 .foregroundColor(.white)
-                .cornerRadius(14)
+                .font(.headline)
+                .cornerRadius(18)
+                .shadow(color: canSubmit ? Color.blue.opacity(0.25) : .clear, radius: 8, x: 0, y: 5)
                 .disabled(!canSubmit)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 22)
             }
             .padding(.vertical, 10)
         }
         .navigationTitle("Üye Ol")
         .alert("Bilgi", isPresented: $showAlert) {
             Button("Tamam") {
-                if wasSuccess { dismiss() }
+                if wasSuccess {
+                    dismiss()
+                }
             }
         } message: {
             Text(alertMsg)
@@ -128,11 +149,13 @@ struct UyeOlView: View {
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
-                Button("Kapat") { focused = nil }
+                Button("Kapat") {
+                    focused = nil
+                }
             }
         }
         .safeAreaInset(edge: .bottom) {
-             Color.clear.frame(height: focused == nil ? 0 : 70)
+            Color.clear.frame(height: focused == nil ? 0 : 70)
         }
     }
 
@@ -149,30 +172,19 @@ struct UyeOlView: View {
         isLoading = true
         defer { isLoading = false }
 
-        let payload = PatientCreate(
-            ad: ad.trimmingCharacters(in: .whitespaces),
-            soyad: soyad.trimmingCharacters(in: .whitespaces),
-            tc_kimlik: tc,
-            sifre: sifre,
-            email: email.lowercased(),
-            dogum_tarihi: dateString(dogumTarihi)
+        let payload = RegisterRequest(
+            name: ad.trimmingCharacters(in: .whitespaces),
+            surname: soyad.trimmingCharacters(in: .whitespaces),
+            tcKimlik: tc,
+            password: sifre,
+            cinsiyet: cinsiyet,
+            dogumTarihi: dateString(dogumTarihi)
         )
 
         do {
-            let dto = try await API.register(payload)
+            let result = try await registerUser(payload)
             wasSuccess = true
-            alertMsg = "Kayıt oluşturuldu. ID: \(dto.id)"
-            showAlert = true
-        } catch let apiErr as API.Failure {
-            wasSuccess = false
-            switch apiErr {
-            case .invalidResponse(let code):
-                if code == 409 { alertMsg = "Bu T.C. veya e-posta ile zaten kayıt var." }
-                else if code == 422 { alertMsg = "Eksik veya hatalı alanlar var." }
-                else { alertMsg = "Sunucu hatası: \(code)" }
-            case .decoding(let err):
-                alertMsg = "Veri çözümleme hatası: \(err.localizedDescription)"
-            }
+            alertMsg = "\(result.message ?? "Kayıt başarılı"). Giriş yapabilirsiniz."
             showAlert = true
         } catch {
             wasSuccess = false
@@ -180,21 +192,58 @@ struct UyeOlView: View {
             showAlert = true
         }
     }
+
+    private func registerUser(_ payload: RegisterRequest) async throws -> RegisterResponse {
+        var request = URLRequest(url: APIConfig.registerURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(
+                domain: "API",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Sunucu cevabı okunamadı."]
+            )
+        }
+
+        guard 200..<300 ~= httpResponse.statusCode else {
+            let msg = String(data: data, encoding: .utf8) ?? "Kayıt başarısız."
+            throw NSError(
+                domain: "API",
+                code: httpResponse.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: msg]
+            )
+        }
+
+        return try JSONDecoder().decode(RegisterResponse.self, from: data)
+    }
 }
 
 struct SectionView<Content: View>: View {
     let title: String
+    let color: Color
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.title3.bold())
+                .foregroundColor(.white)
+
             content
         }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
-        .padding(.horizontal, 20)
+        .padding(18)
+        .background(color.gradient, in: RoundedRectangle(cornerRadius: 22))
+        .shadow(color: color.opacity(0.25), radius: 10, x: 0, y: 6)
+        .padding(.horizontal, 22)
     }
 }
-*/
+
+#Preview {
+    NavigationStack {
+        UyeOlView()
+    }
+}

@@ -108,7 +108,7 @@ struct ContentView: View {
                         .disabled(vm.isLoading)
 
                         NavigationLink {
-                            // UyeOlView()
+                             UyeOlView()
                         } label: {
                             Text("Üye Ol")
                                 .fontWeight(.semibold)
@@ -143,7 +143,14 @@ struct ContentView: View {
                 .padding(20)
             }
             .navigationDestination(isPresented: $pushHome) {
-                AnaSayfa()
+                AnaSayfa(
+                    userId: vm.userId ?? 0,
+                    userName: vm.userName ?? "Kullanıcı",
+                    userTc: tc
+                )
+            }
+            .navigationDestination(isPresented: $pushSignup) {
+                UyeOlView()
             }
             .alert("Hata", isPresented: .constant(vm.error != nil)) {
                 Button("Tamam") { vm.error = nil }
@@ -169,7 +176,9 @@ struct ContentView: View {
                         await sendVoiceTCToBackend(audioURL: audioURL)
                     }
                 }
-
+                voiceManager.onSignupSelected = {
+                    pushSignup = true
+                }
                 voiceManager.onVoiceLoginRecorded = { audioURL in
                     Task {
                         await sendVoiceLoginToBackend(audioURL: audioURL)
@@ -233,6 +242,7 @@ struct ContentView: View {
             self.tc = result.tcKimlik
 
             self.challengeCode = String(Int.random(in: 1000...9999))
+            self.shouldRecordChallenge = true
 
             voiceManager.speak("\(challengeCode) kodunu sesli olarak tekrar edin")
 

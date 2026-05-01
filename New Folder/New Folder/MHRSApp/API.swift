@@ -5,18 +5,19 @@ enum APIConfig {
     static var loginURL: URL {
         URL(string: "\(baseURL)/api/users/login")!
     }
-
     static var recognizeTcURL: URL {
         URL(string: "\(baseURL)/api/users/recognize-tc")!
     }
-
     static var voiceLoginURL: URL {
         URL(string: "\(baseURL)/api/users/login-voice")!
     }
-
     static var registerURL: URL {
         URL(string: "\(baseURL)/api/users/register")!
     }
+    static func userDetailURL(userId: Int) -> URL {
+        URL(string: "\(baseURL)/api/users/\(userId)")!
+    }
+    
 }
 /*import Foundation
 

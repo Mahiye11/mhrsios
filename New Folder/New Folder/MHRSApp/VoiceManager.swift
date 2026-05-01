@@ -7,6 +7,8 @@ enum VoiceState {
     case askingPermission
     case listeningForPermission
     case askingTC
+    case askingFlowChoice
+    case listeningForFlowChoice
 }
 
 class VoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
@@ -17,7 +19,8 @@ class VoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     var onVoiceLoginRecorded: ((URL) -> Void)?
     var onManualLoginSelected: (() -> Void)?
     var onSpeakFinished: (() -> Void)?
-
+    var onSignupSelected: (() -> Void)?
+    
     private var currentState: VoiceState = .idle
 
     private let speechSynthesizer = AVSpeechSynthesizer()
@@ -74,7 +77,11 @@ class VoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.startRecordingTCVoice()
             }
-
+        case .askingFlowChoice:
+            currentState = .listeningForFlowChoice
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                self.startListening()
+            }
         default:
             onSpeakFinished?()
         }
@@ -232,8 +239,8 @@ class VoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
         case .listeningForPermission:
             if text.contains("evet") {
                 stopListening()
-                currentState = .askingTC
-                speak("TC kimlik numaranızı söyleyin")
+                currentState = .askingFlowChoice
+                speak("Giriş mi yapmak istersiniz, üye mi olmak istersiniz?")
             } else if text.contains("hayır") || text.contains("hayir") {
                 stopListening()
                 currentState = .idle
@@ -241,8 +248,23 @@ class VoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
                 onManualLoginSelected?()
             }
 
+        case .listeningForFlowChoice:
+            if text.contains("giriş") || text.contains("giris") {
+                stopListening()
+                currentState = .askingTC
+                speak("TC kimlik numaranızı söyleyin")
+            } else if text.contains("üye") || text.contains("uye") || text.contains("kayıt") || text.contains("kayit") {
+                stopListening()
+                currentState = .idle
+                speak("Üye olma sayfasına yönlendiriliyorsunuz")
+                onSignupSelected?()
+            } else {
+                stopListening()
+                currentState = .askingFlowChoice
+                speak("Anlayamadım. Giriş mi yapmak istersiniz, üye mi olmak istersiniz?")
+            }
+
         default:
             break
         }
-    }
-}
+    }}
