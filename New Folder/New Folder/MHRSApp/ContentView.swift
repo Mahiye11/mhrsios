@@ -151,7 +151,7 @@ struct ContentView: View {
             .navigationDestination(isPresented: $pushHome) {
                 AnaSayfa(
                     userId: vm.userId ?? 0,
-                    userName: vm.userName ?? "Kullanıcı",
+                    userName: vm.userName ?? "",
                     userTc: tc
                 )
             }
@@ -190,8 +190,6 @@ struct ContentView: View {
                         await sendVoiceLoginToBackend(audioURL: audioURL)
                     }
                 }
-
-                
             }
         }
     }
@@ -199,7 +197,14 @@ struct ContentView: View {
     private func doLogin() async {
         voiceManager.stopListening()
         focusedField = nil
-
+        if tc.count != 11 || !tc.allSatisfy({ $0.isNumber }) {
+            vm.error = "TC Kimlik Numarası 11 haneli olmalıdır."
+            return
+        }
+        if password.count != 4 || !password.allSatisfy({ $0.isNumber }) {
+            vm.error = "Şifre 4 haneli olmalıdır."
+            return
+        }
         if await vm.login(tc: tc, password: password) {
             withAnimation {
                 pushHome = true
@@ -302,8 +307,6 @@ struct ContentView: View {
             withAnimation {
                 pushHome = true
             }
-            
-
         } catch {
             vm.error = "Sesli giriş hatası: \(error.localizedDescription)"
         }
@@ -313,7 +316,6 @@ struct ContentView: View {
 struct TCResponse: Codable {
     let tcKimlik: String
 }
-
 #Preview {
     ContentView()
 }

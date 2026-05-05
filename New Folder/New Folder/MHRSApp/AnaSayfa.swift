@@ -11,124 +11,145 @@ struct AnaSayfa: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
-    @State private var pushToHastane = false
     @State private var showAileHekimiSheet = false
+    @State private var shouldStartHomeVoice = true
+    @State private var pushVoiceSymptom = false
+    @State private var pushProfile = false
+    @State private var pushToHastane = false
 
     @StateObject private var homeVoice = HomeVoiceManager()
-    
     @Environment(\.dismiss) private var dismiss
-    @State private var showMenu = false
-    @State private var pushProfile = false
 
     var body: some View {
-        VStack {
-            ScrollView {
-                VStack(spacing: 24) {
+        ScrollView {
+            VStack(spacing: 24) {
 
-                    HStack(spacing: 20) {
-                        Button {
-                            showAileHekimiSheet = true
-                        } label: {
-                            VStack {
-                                Image(systemName: "person.crop.circle.fill")
-                                    .font(.system(size: 42))
-
-                                Text("Aile Hekimi\nRandevusu Al")
-                                    .multilineTextAlignment(.center)
-                            }
-                            .frame(width: 160, height: 120)
-                            .background(Color.teal)
-                            .foregroundColor(.white)
-                            .cornerRadius(16)
-                        }
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Text(userName.uppercased())
-                                    .font(.subheadline)
-                                    .foregroundColor(.gray)
-                            }
-
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Menu {
-                                    Button {
-                                        pushProfile = true
-                                    } label: {
-                                        Label("Profilim", systemImage: "person.fill")
-                                    }
-
-                                    Button(role: .destructive) {
-                                        dismiss()
-                                    } label: {
-                                        Label("Çıkış Yap", systemImage: "rectangle.portrait.and.arrow.right")
-                                    }
-                                } label: {
-                                    Image(systemName: "line.3.horizontal")
-                                        .font(.title2)
-                                        .foregroundColor(.black)
-                                }
-                            }
-                        }
-
-                        Button {
-                            pushToHastane = true
-                        } label: {
-                            VStack {
-                                Image(systemName: "cross.case.fill")
-                                    .font(.system(size: 42))
-
-                                Text("Hastane\nRandevusu Al")
-                                    .multilineTextAlignment(.center)
-                            }
-                            .frame(width: 160, height: 120)
-                            .background(Color.red)
-                            .foregroundColor(.white)
-                            .cornerRadius(16)
-                        }
+                HStack(spacing: 20) {
+                    Button {
+                        shouldStartHomeVoice = false
+                        homeVoice.stopAll()
+                        showAileHekimiSheet = true
+                    } label: {
+                        HomeBigButton(
+                            icon: "person.crop.circle.fill",
+                            title: "Aile Hekimi\nRandevusu Al",
+                            color: .teal
+                        )
                     }
+                    .buttonStyle(.plain)
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Randevularınız")
-                            .font(.title2.bold())
-                            .padding(.horizontal)
-
-                        if isLoading {
-                            ProgressView("Randevular yükleniyor...")
-                                .padding()
-                        } else if appointments.isEmpty {
-                            Text("Henüz randevunuz bulunmuyor.")
-                                .foregroundColor(.gray)
-                                .padding()
-                        } else {
-                            ForEach(appointments) { appointment in
-                                AppointmentCard(appointment: appointment)
-                            }
-                        }
+                    Button {
+                        print("HASTANE BUTONUNA BASILDI")
+                        shouldStartHomeVoice = false
+                        homeVoice.stopAll()
+                        pushToHastane = true
+                    } label: {
+                        HomeBigButton(
+                            icon: "cross.case.fill",
+                            title: "Hastane\nRandevusu Al",
+                            color: .red
+                        )
                     }
-                    .padding(.horizontal)
+                    .buttonStyle(.plain)
                 }
-                .padding(.top, 20)
+                .padding(.horizontal)
+
+                Button {
+                    shouldStartHomeVoice = false
+                    homeVoice.stopAll()
+                    pushVoiceSymptom = true
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "mic.fill")
+                            .font(.title)
+
+                        Text("Sesli Semptom Anlat")
+                            .font(.headline.bold())
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 64)
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(18)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Randevularınız")
+                        .font(.title.bold())
+                        .padding(.horizontal)
+
+                    if isLoading {
+                        ProgressView("Randevular yükleniyor...")
+                            .padding()
+                    } else if appointments.isEmpty {
+                        Text("Henüz randevunuz bulunmuyor.")
+                            .font(.title3)
+                            .foregroundColor(.gray)
+                            .padding(.horizontal)
+                    } else {
+                        ForEach(appointments) { appointment in
+                            AppointmentCard(appointment: appointment)
+                        }
+                    }
+                }
+                .padding(.horizontal)
             }
+            .padding(.top, 24)
         }
         .navigationTitle("MHRS")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarLeading) {
                 Text(userName.uppercased())
                     .font(.subheadline)
                     .foregroundColor(.gray)
             }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        shouldStartHomeVoice = false
+                        homeVoice.stopAll()
+                        pushProfile = true
+                    } label: {
+                        Label("Profilim", systemImage: "person.fill")
+                    }
+
+                    Button(role: .destructive) {
+                        shouldStartHomeVoice = false
+                        homeVoice.stopAll()
+                        dismiss()
+                    } label: {
+                        Label("Çıkış Yap", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.title)
+                        .foregroundColor(.black)
+                }
+            }
         }
-        .navigationDestination(isPresented: $pushToHastane) {
-            Text("Hastane Randevu Sayfası")
+        .navigationDestination(isPresented: $pushVoiceSymptom) {
+            VoiceSymptomView()
         }
         .navigationDestination(isPresented: $pushProfile) {
             ProfilView(userId: userId, fallbackName: userName, userTc: userTc)
         }
-        .sheet(isPresented: $showAileHekimiSheet) {
-            Text("Aile Hekimi Randevu Sayfası")
+        .fullScreenCover(isPresented: $pushToHastane) {
+            NavigationStack {
+                HastaneRandevuView()
+            }
         }
-        .alert("Hata", isPresented: .constant(errorMessage != nil)) {
+        .sheet(isPresented: $showAileHekimiSheet) {
+            AileHekimiRandevuView()
+        }
+        .alert("Hata", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
             Button("Tamam") {
                 errorMessage = nil
             }
@@ -140,15 +161,45 @@ struct AnaSayfa: View {
                 await fetchAppointments()
             }
 
-            homeVoice.onReadAppointments = {
-                readAppointmentsWithVoice()
+            homeVoice.onManualMode = {
+                DispatchQueue.main.async {
+                    homeVoice.stopListening()
+                }
             }
 
             homeVoice.onCreateAppointment = {
-                pushToHastane = true
+                DispatchQueue.main.async {
+                    shouldStartHomeVoice = false
+                    homeVoice.stopAll()
+                    pushToHastane = true
+                }
             }
 
-            homeVoice.startInitialFlow()
+            homeVoice.onVoiceSymptom = {
+                DispatchQueue.main.async {
+                    shouldStartHomeVoice = false
+                    homeVoice.stopAll()
+                    pushVoiceSymptom = true
+                }
+            }
+
+            homeVoice.onReadAppointments = {
+                DispatchQueue.main.async {
+                    readAppointmentsWithVoice()
+                }
+            }
+
+            shouldStartHomeVoice = true
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if shouldStartHomeVoice {
+                    homeVoice.startInitialFlow()
+                }
+            }
+        }
+        .onDisappear {
+            shouldStartHomeVoice = false
+            homeVoice.stopAll()
         }
     }
 
@@ -174,13 +225,14 @@ struct AnaSayfa: View {
             appointments = try JSONDecoder().decode([AppointmentDTO].self, from: data)
 
         } catch {
-            errorMessage = "Randevu bağlantı hatası: \(error.localizedDescription)"
+            print("Randevu hatası:", error.localizedDescription)
+            appointments = []
         }
     }
 
     private func readAppointmentsWithVoice() {
         if appointments.isEmpty {
-            homeVoice.speakAndAskCreateAppointment("Randevunuz bulunmamaktadır. Yeni bir randevu oluşturmak ister misiniz?")
+            homeVoice.speakAndAskCreateAppointment("Randevunuz bulunmamaktadır.")
             return
         }
 
@@ -189,15 +241,37 @@ struct AnaSayfa: View {
         for appointment in appointments {
             let clinicName = appointment.doctor?.clinic?.name ?? appointment.doctor?.specialization ?? "Bilinmeyen klinik"
             let doctorName = appointment.doctor?.name ?? "Doktor bilgisi yok"
-            let status = appointment.status ?? "Durum bilgisi yok"
-
-            message += "\(clinicName), \(doctorName), durum: \(status). "
+            message += "\(clinicName), \(doctorName). "
         }
 
-        message += "Randevu oluşturmak ister misiniz?"
         homeVoice.speakAndAskCreateAppointment(message)
     }
 }
+
+struct HomeBigButton: View {
+    let icon: String
+    let title: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 46))
+
+            Text(title)
+                .font(.title3)
+                .multilineTextAlignment(.center)
+        }
+        .frame(width: 160, height: 120)
+        .background(color)
+        .foregroundColor(.white)
+        .cornerRadius(18)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Models
+
 struct AppointmentDTO: Identifiable, Codable {
     let id: Int
     let appointmentDateTime: String?
@@ -205,23 +279,29 @@ struct AppointmentDTO: Identifiable, Codable {
     let doctor: DoctorDTO?
     let user: AppointmentUserDTO?
 }
+
 struct DoctorDTO: Codable, Hashable {
     let id: Int?
     let name: String?
     let specialization: String?
     let clinic: ClinicDTO?
 }
+
 struct ClinicDTO: Codable, Hashable {
     let id: Int?
     let name: String?
     let location: String?
 }
+
 struct AppointmentUserDTO: Codable, Hashable {
     let id: Int?
     let name: String?
     let surname: String?
     let tcKimlik: String?
 }
+
+// MARK: - Appointment Card
+
 struct AppointmentCard: View {
     let appointment: AppointmentDTO
 
@@ -235,7 +315,7 @@ struct AppointmentCard: View {
                     .font(.subheadline)
 
                 if let date = appointment.appointmentDateTime {
-                    Text(date)
+                    Text(formatDate(date))
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -253,5 +333,11 @@ struct AppointmentCard: View {
         .background(Color.white)
         .cornerRadius(14)
         .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+    }
+
+    private func formatDate(_ rawDate: String) -> String {
+        rawDate
+            .replacingOccurrences(of: "T", with: " ")
+            .replacingOccurrences(of: ".000+00:00", with: "")
     }
 }

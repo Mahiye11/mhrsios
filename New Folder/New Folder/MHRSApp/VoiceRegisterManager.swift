@@ -21,6 +21,7 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
     @Published var isRecording = false
     @Published var sampleCount = 0
     @Published var statusMessage = ""
+    @Published var currentChallenge = ""
 
     @Published var name = ""
     @Published var surname = ""
@@ -133,22 +134,37 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
         shouldListenAfterSpeak = false
         speak(text)
     }
-
     private func speak(_ text: String) {
         stopListening()
+
+        if audioRecorder?.isRecording == true {
+            audioRecorder?.stop()
+            audioRecorder = nil
+            isRecording = false
+        }
+
         isSpeakingNow = true
 
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .duckOthers])
-        try? session.setActive(true)
+
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+        } catch {
+            print("TTS session hata:", error.localizedDescription)
+        }
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "tr-TR")
-        utterance.rate = 0.45
+        utterance.rate = 0.43
+        utterance.volume = 1.0
 
         synthesizer.speak(utterance)
     }
-
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         isSpeakingNow = false
 
@@ -163,8 +179,8 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
         if shouldRecordAfterSpeak {
             shouldRecordAfterSpeak = false
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                self.startVoiceSampleRecording()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0 ) {
+                self.startActualVoiceRecording()
             }
         }
     }
@@ -371,19 +387,78 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
     private func repeatCurrentStep(_ message: String) {
         speakThenListen(message)
     }
-
     private func startVoiceSampleFlow() {
         sampleCount = 0
         sampleURLs.removeAll()
+        currentChallenge = ""
 
-        speakThenRecord("Bilgiler alındı. Şimdi ses profiliniz için 3 kez ses kaydı alınacak. Her kayıtta ekrandaki süre boyunca net şekilde konuşun. İlk kayıt başlıyor.")
+        speakThenPrepareCode("Bilgiler alındı. Şimdi ses profiliniz için 3 kez güvenlik kodu okuyacaksınız. İlk kod hazırlanıyor.")
     }
+    private func speakThenPrepareCode(_ text: String) {
+        stepText = text
+        shouldListenAfterSpeak = false
+        shouldRecordAfterSpeak = false
+        speak(text)
 
-    private func startVoiceSampleRecording() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            self.prepareNextVoiceCode()
+        }
+    }
+    private func prepareNextVoiceCode() {
+        guard sampleCount < 3 else {
+            currentChallenge = ""
+            stepText = "Ses kayıtları tamamlandı. Sunucuya gönderiliyor."
+            Task {
+                await uploadVoiceRegister()
+            }
+            return
+        }
+
+        currentChallenge = String(Int.random(in: 1000...9999))
+        let spokenCode = currentChallenge.map { String($0) }.joined(separator: " ")
+
+        let orderText: String
+        if sampleCount == 0 {
+            orderText = "İlk kod"
+        } else if sampleCount == 1 {
+            orderText = "İkinci kod"
+        } else {
+            orderText = "Son kod"
+        }
+
+        stepText = "\(orderText): \(currentChallenge)."
+
+        shouldListenAfterSpeak = false
+        shouldRecordAfterSpeak = true
+
+        speak("\(orderText): \(spokenCode) söyleyin")
+    }
+    private func startActualVoiceRecording() {
+        guard !synthesizer.isSpeaking else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.startActualVoiceRecording()
+            }
+            return
+        }
+
         guard sampleCount < 3 else {
             Task {
                 await uploadVoiceRegister()
             }
+            return
+        }
+
+        let session = AVAudioSession.sharedInstance()
+
+        do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: [.defaultToSpeaker, .duckOthers, .allowBluetooth]
+            )
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            onError?("Kayıt oturumu başlatılamadı: \(error.localizedDescription)")
             return
         }
 
@@ -392,16 +467,28 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
 
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatLinearPCM),
-            AVSampleRateKey: 16000,
-            AVNumberOfChannelsKey: 1
+            AVSampleRateKey: 16000.0,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]
 
         do {
             audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-            audioRecorder?.record()
+            audioRecorder?.isMeteringEnabled = true
+            audioRecorder?.prepareToRecord()
+
+            let started = audioRecorder?.record() ?? false
+
+            guard started else {
+                onError?("Ses kaydı başlatılamadı.")
+                return
+            }
 
             isRecording = true
-            stepText = "\(sampleCount + 1). ses kaydı alınıyor. Lütfen 5 saniye boyunca net konuşun."
+            stepText = "\(sampleCount + 1). ses kaydı alınıyor. Lütfen ekrandaki kodu okuyun: \(currentChallenge)"
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
                 self.audioRecorder?.stop()
@@ -412,8 +499,9 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
                 self.sampleCount += 1
 
                 if self.sampleCount < 3 {
-                    self.speakThenRecord("\(self.sampleCount). kayıt alındı. Sıradaki kayıt başlıyor.")
+                    self.speakThenPrepareCode("\(self.sampleCount). kayıt alındı. Sıradaki kod hazırlanıyor.")
                 } else {
+                    self.currentChallenge = ""
                     self.stepText = "Ses kayıtları tamamlandı. Sunucuya gönderiliyor."
                     Task {
                         await self.uploadVoiceRegister()
@@ -425,7 +513,6 @@ final class VoiceRegisterManager: NSObject, ObservableObject, AVSpeechSynthesize
             onError?("Ses kaydı başlatılamadı: \(error.localizedDescription)")
         }
     }
-
     @MainActor
     private func uploadVoiceRegister() async {
         guard !name.isEmpty,
