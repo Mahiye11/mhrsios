@@ -1,7 +1,7 @@
 import Foundation
 
 enum APIConfig {
-    static let baseURL = "http://192.168.1.158:5050"
+    static let baseURL = "http://192.168.1.158:8080"
     static var loginURL: URL {
         URL(string: "\(baseURL)/api/users/login")!
     }
@@ -29,5 +29,16 @@ enum APIConfig {
     static var aiRecommendationURL: URL {
         URL(string: "\(baseURL)/api/ai/recommend-doctors")!
     }
+    static func deleteAppointmentURL(appointmentId: Int) -> URL {
+        URL(string: "\(baseURL)/api/appointments/\(appointmentId)")!
+    }
+    static var createAppointmentURL: URL {
+        URL(string: "\(baseURL)/api/appointments")!
+    }
+
+    static func availableSlotsURL(doctorId: Int, date: String) -> URL {
+        URL(string: "\(baseURL)/api/appointments/available-slots?doctorId=\(doctorId)&date=\(date)")!
+    }
+    
     
 }

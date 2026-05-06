@@ -90,7 +90,14 @@ struct AnaSayfa: View {
                             .padding(.horizontal)
                     } else {
                         ForEach(appointments) { appointment in
-                            AppointmentCard(appointment: appointment)
+                            AppointmentCard(
+                                appointment: appointment,
+                                onCancel: {
+                                    Task {
+                                        await deleteAppointment(appointment)
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -133,14 +140,18 @@ struct AnaSayfa: View {
             }
         }
         .navigationDestination(isPresented: $pushVoiceSymptom) {
-            VoiceSymptomView()
+            VoiceSymptomView(userId: userId)
         }
         .navigationDestination(isPresented: $pushProfile) {
             ProfilView(userId: userId, fallbackName: userName, userTc: userTc)
         }
-        .fullScreenCover(isPresented: $pushToHastane) {
+        .fullScreenCover(isPresented: $pushToHastane, onDismiss: {
+            Task {
+                await fetchAppointments()
+            }
+        }) {
             NavigationStack {
-                HastaneRandevuView()
+                HastaneRandevuView(userId: userId, initialClinic: nil)
             }
         }
         .sheet(isPresented: $showAileHekimiSheet) {
@@ -202,34 +213,76 @@ struct AnaSayfa: View {
             homeVoice.stopAll()
         }
     }
-
     @MainActor
     private func fetchAppointments() async {
         isLoading = true
+        errorMessage = nil
+
         defer { isLoading = false }
 
+        let url = APIConfig.appointmentsByUserURL(userId: userId)
+
         do {
-            let url = URL(string: "\(APIConfig.baseURL)/api/appointments/user/\(userId)")!
             let (data, response) = try await URLSession.shared.data(from: url)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                errorMessage = "Sunucu cevabı okunamadı."
+                errorMessage = "Sunucudan geçersiz cevap geldi."
                 return
             }
 
             guard 200..<300 ~= httpResponse.statusCode else {
-                errorMessage = String(data: data, encoding: .utf8) ?? "Randevular alınamadı."
+                let serverMessage = String(data: data, encoding: .utf8) ?? ""
+                print("Sunucu hatası:", httpResponse.statusCode, serverMessage)
+                errorMessage = "Randevular alınamadı."
                 return
             }
 
-            appointments = try JSONDecoder().decode([AppointmentDTO].self, from: data)
+            let decoder = JSONDecoder()
+            let decoded = try decoder.decode([AppointmentDTO].self, from: data)
 
+            appointments = decoded.sorted {
+                ($0.appointmentDateTime ?? "") < ($1.appointmentDateTime ?? "")
+            }
+
+            print("Randevular başarıyla çekildi:", appointments.count)
+
+        } catch let error as DecodingError {
+            print("Decode hatası:", error)
+            errorMessage = "Randevu verisi okunamadı."
         } catch {
-            print("Randevu hatası:", error.localizedDescription)
-            appointments = []
+            print("Bağlantı hatası:", error.localizedDescription)
+            errorMessage = "Sunucuya bağlanılamadı."
         }
     }
+    @MainActor
+    private func deleteAppointment(_ appointment: AppointmentDTO) async {
+        let url = APIConfig.deleteAppointmentURL(appointmentId: appointment.id)
 
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                errorMessage = "Sunucudan geçersiz cevap geldi."
+                return
+            }
+
+            guard 200..<300 ~= httpResponse.statusCode else {
+                let message = String(data: data, encoding: .utf8) ?? ""
+                print("İptal hatası:", httpResponse.statusCode, message)
+                errorMessage = "Randevu iptal edilemedi."
+                return
+            }
+
+            appointments.removeAll { $0.id == appointment.id }
+
+        } catch {
+            print("Randevu iptal bağlantı hatası:", error.localizedDescription)
+            errorMessage = "Bağlantı hatası oluştu."
+        }
+    }
     private func readAppointmentsWithVoice() {
         if appointments.isEmpty {
             homeVoice.speakAndAskCreateAppointment("Randevunuz bulunmamaktadır.")
@@ -269,15 +322,23 @@ struct HomeBigButton: View {
         .contentShape(Rectangle())
     }
 }
-
-// MARK: - Models
-
 struct AppointmentDTO: Identifiable, Codable {
     let id: Int
+    let user: AppointmentUserDTO?
+    let doctor: DoctorDTO?
     let appointmentDateTime: String?
     let status: String?
-    let doctor: DoctorDTO?
-    let user: AppointmentUserDTO?
+    let notes: String?
+}
+
+struct AppointmentUserDTO: Codable, Hashable {
+    let id: Int?
+    let name: String?
+    let surname: String?
+    let tcKimlik: String?
+    let phone: String?
+    let cinsiyet: String?
+    let dogumTarihi: String?
 }
 
 struct DoctorDTO: Codable, Hashable {
@@ -286,58 +347,115 @@ struct DoctorDTO: Codable, Hashable {
     let specialization: String?
     let clinic: ClinicDTO?
 }
-
 struct ClinicDTO: Codable, Hashable {
     let id: Int?
     let name: String?
     let location: String?
 }
 
-struct AppointmentUserDTO: Codable, Hashable {
-    let id: Int?
-    let name: String?
-    let surname: String?
-    let tcKimlik: String?
-}
-
 // MARK: - Appointment Card
-
 struct AppointmentCard: View {
     let appointment: AppointmentDTO
+    let onCancel: () -> Void
+
+    @State private var showCancelAlert = false
+
+    private var isPastAppointment: Bool {
+        guard let rawDate = appointment.appointmentDateTime else {
+            return false
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+
+        guard let appointmentDate = formatter.date(from: rawDate) else {
+            return false
+        }
+
+        return appointmentDate < Date()
+    }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(appointment.doctor?.clinic?.name ?? appointment.doctor?.specialization ?? "Klinik bilgisi yok")
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(
+                        appointment.doctor?.clinic?.name
+                        ?? appointment.doctor?.specialization
+                        ?? "Klinik bilgisi yok"
+                    )
                     .font(.headline)
 
-                Text(appointment.doctor?.name ?? "Doktor bilgisi yok")
-                    .font(.subheadline)
+                    Text(appointment.doctor?.name ?? "Doktor bilgisi yok")
+                        .font(.subheadline)
 
-                if let date = appointment.appointmentDateTime {
-                    Text(formatDate(date))
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    if let date = appointment.appointmentDateTime {
+                        Text(formatDate(date))
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
+
+                Spacer()
+
+                Text(appointment.status ?? "Bilinmiyor")
+                    .font(.caption)
+                    .padding(8)
+                    .background(Color.blue.opacity(0.12))
+                    .cornerRadius(8)
             }
 
-            Spacer()
-
-            Text(appointment.status ?? "Bilinmiyor")
-                .font(.caption)
-                .padding(8)
-                .background(Color.blue.opacity(0.12))
-                .cornerRadius(8)
+            if isPastAppointment {
+                Text("Geçmiş randevunuz")
+                    .font(.headline)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            } else {
+                Button(role: .destructive) {
+                    showCancelAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "trash.fill")
+                        Text("Randevuyu İptal Et")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+            }
         }
         .padding()
         .background(Color.white)
         .cornerRadius(14)
         .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+        .alert("Randevu iptal edilsin mi?", isPresented: $showCancelAlert) {
+            Button("Vazgeç", role: .cancel) { }
+
+            Button("İptal Et", role: .destructive) {
+                onCancel()
+            }
+        } message: {
+            Text("Bu işlem geri alınamaz.")
+        }
     }
 
     private func formatDate(_ rawDate: String) -> String {
-        rawDate
-            .replacingOccurrences(of: "T", with: " ")
-            .replacingOccurrences(of: ".000+00:00", with: "")
+        let inputFormatter = DateFormatter()
+        inputFormatter.locale = Locale(identifier: "tr_TR")
+        inputFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+
+        let outputFormatter = DateFormatter()
+        outputFormatter.locale = Locale(identifier: "tr_TR")
+        outputFormatter.dateFormat = "dd MMMM yyyy HH:mm"
+
+        if let date = inputFormatter.date(from: rawDate) {
+            return outputFormatter.string(from: date)
+        }
+
+        return rawDate.replacingOccurrences(of: "T", with: " ")
     }
 }

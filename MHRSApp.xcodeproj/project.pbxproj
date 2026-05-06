@@ -412,9 +412,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "MHRSApp-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "";
+				INFOPLIST_KEY_CFBundleDisplayName = MedSes;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Size yakın hastaneleri gösterebilmek için konum bilginizi kullanıyoruz.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sesli giriş yapabilmeniz ve asistanla konuşabilmeniz için mikrofon erişimine ihtiyacımız var.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sesli komutlarınızı anlayıp size yardımcı olabilmek için konuşma tanıma iznine ihtiyacımız var.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -445,9 +446,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "MHRSApp-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "";
+				INFOPLIST_KEY_CFBundleDisplayName = MedSes;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Size yakın hastaneleri gösterebilmek için konum bilginizi kullanıyoruz.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sesli giriş yapabilmeniz ve asistanla konuşabilmeniz için mikrofon erişimine ihtiyacımız var.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sesli komutlarınızı anlayıp size yardımcı olabilmek için konuşma tanıma iznine ihtiyacımız var.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

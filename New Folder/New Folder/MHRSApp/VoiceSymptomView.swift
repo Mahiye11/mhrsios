@@ -11,6 +11,7 @@ import Speech
 import AVFoundation
 
 struct VoiceSymptomView: View {
+    let userId: Int
     @StateObject private var vm = VoiceSymptomViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var inputText = ""
@@ -109,7 +110,7 @@ struct VoiceSymptomView: View {
                         .frame(width: 52, height: 52)
                         .background(
                             vm.isAssistantSpeaking ? Color.red :
-                            vm.isListening ? Color.blue :
+                            vm.isListening ? Color.green :
                             Color.blue
                         )
                         .clipShape(Circle())
@@ -117,6 +118,12 @@ struct VoiceSymptomView: View {
             }
             .padding()
             .background(Color.white)
+        }
+        .navigationDestination(isPresented: $vm.shouldNavigateToAppointment) {
+            HastaneRandevuView(
+                userId: userId,
+                initialClinic: vm.recommendedClinic
+            )
         }
         .background(Color(.systemGray6))
         .onAppear {
