@@ -19,6 +19,9 @@ struct AnaSayfa: View {
 
     @StateObject private var homeVoice = HomeVoiceManager()
     @Environment(\.dismiss) private var dismiss
+    
+    private let mainMenuPrompt = "Hastane randevusu mu, aile hekimi randevusu mu, sesli semptom analizi mi, profil bilgilerinizi güncellemek mi istersiniz, yoksa randevularınızı mı okumak istersiniz?"
+
 
     var body: some View {
         ScrollView {
@@ -145,9 +148,22 @@ struct AnaSayfa: View {
         .navigationDestination(isPresented: $pushProfile) {
             ProfilView(userId: userId, fallbackName: userName, userTc: userTc)
         }
+        .onChange(of: pushVoiceSymptom) { _, isPresented in
+            if !isPresented {
+                restartHomeVoiceFlowAfterReturn()
+            }
+        }
+        .onChange(of: pushProfile) { _, isPresented in
+            if !isPresented {
+                restartHomeVoiceFlowAfterReturn()
+            }
+        }
         .fullScreenCover(isPresented: $pushToHastane, onDismiss: {
             Task {
                 await fetchAppointments()
+                await MainActor.run {
+                    restartHomeVoiceFlowAfterReturn()
+                }
             }
         }) {
             NavigationStack {
@@ -157,9 +173,12 @@ struct AnaSayfa: View {
         .sheet(isPresented: $showAileHekimiSheet, onDismiss: {
             Task {
                 await fetchAppointments()
+                await MainActor.run {
+                    restartHomeVoiceFlowAfterReturn()
+                }
             }
         }) {
-            AileHekimiRandevuView(userId: userId)
+            AileHekimiRandevuView(userId: userId, startWithVoice: true)
         }
         .alert("Hata", isPresented: Binding(
             get: { errorMessage != nil },
@@ -204,6 +223,28 @@ struct AnaSayfa: View {
                 }
             }
 
+            homeVoice.onFamilyDoctorAppointment = {
+                DispatchQueue.main.async {
+                    shouldStartHomeVoice = false
+                    homeVoice.stopAll()
+                    showAileHekimiSheet = true
+                }
+            }
+
+            homeVoice.onProfile = {
+                DispatchQueue.main.async {
+                    shouldStartHomeVoice = false
+                    homeVoice.stopAll()
+                    pushProfile = true
+                }
+            }
+            homeVoice.onLogout = {
+                DispatchQueue.main.async {
+                    shouldStartHomeVoice = false
+                    homeVoice.stopAll()
+                    dismiss()
+                }
+            }
             shouldStartHomeVoice = true
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -289,20 +330,63 @@ struct AnaSayfa: View {
     }
     private func readAppointmentsWithVoice() {
         if appointments.isEmpty {
-            homeVoice.speakAndAskCreateAppointment("Randevunuz bulunmamaktadır.")
+            homeVoice.speakAndAskAnotherRequest("Randevunuz bulunmamaktadır. Başka isteğiniz var mı?")
             return
         }
 
         var message = "\(userName), randevularınızı okuyorum. "
 
-        for appointment in appointments {
-            let clinicName = appointment.doctor?.clinic?.name ?? appointment.doctor?.specialization ?? "Bilinmeyen klinik"
+        for (index, appointment) in appointments.enumerated() {
+            if index > 0 {
+                message += "Diğer randevunuz. "
+            }
+
+            let clinicName = appointment.doctor?.clinic?.name
+                ?? appointment.doctor?.specialization
+                ?? "Bilinmeyen klinik"
+
             let doctorName = appointment.doctor?.name ?? "Doktor bilgisi yok"
-            message += "\(clinicName), \(doctorName). "
+
+            let dateText: String
+            if let rawDate = appointment.appointmentDateTime {
+                dateText = formatAppointmentDateForVoice(rawDate)
+            } else {
+                dateText = "Tarih bilgisi yok"
+            }
+
+            message += "\(clinicName), \(doctorName), \(dateText). "
         }
 
-        homeVoice.speakAndAskCreateAppointment(message)
+        message += "Başka isteğiniz var mı?"
+        homeVoice.speakAndAskAnotherRequest(message)
     }
+
+    private func formatAppointmentDateForVoice(_ rawDate: String) -> String {
+        let inputFormatter = DateFormatter()
+        inputFormatter.locale = Locale(identifier: "tr_TR")
+        inputFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+
+        let outputFormatter = DateFormatter()
+        outputFormatter.locale = Locale(identifier: "tr_TR")
+        outputFormatter.dateFormat = "dd MMMM yyyy HH:mm"
+
+        if let date = inputFormatter.date(from: rawDate) {
+            return outputFormatter.string(from: date)
+        }
+
+        return rawDate.replacingOccurrences(of: "T", with: " ")
+    }
+    private func restartHomeVoiceFlowAfterReturn() {
+        shouldStartHomeVoice = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if shouldStartHomeVoice {
+                homeVoice.startInitialFlow()
+            }
+        }
+    }
+
+
 }
 
 struct HomeBigButton: View {

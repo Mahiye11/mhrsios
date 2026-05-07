@@ -10,8 +10,8 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
         case listeningVoicePermission
         case askingMainChoice
         case listeningMainChoice
-        case askingCreateAfterRead
-        case listeningCreateAfterRead
+        case askingAnotherRequest
+        case listeningAnotherRequest
     }
 
     @Published var isListening = false
@@ -20,6 +20,11 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
     var onCreateAppointment: (() -> Void)?
     var onVoiceSymptom: (() -> Void)?
     var onManualMode: (() -> Void)?
+    var onFamilyDoctorAppointment: (() -> Void)?
+    var onProfile: (() -> Void)?
+    var onLogout: (() -> Void)?
+
+    private let mainMenuPrompt = "Hastane randevusu mu, aile hekimi randevusu mu, sesli semptom analizi mi, profil bilgilerinizi güncellemek mi istersiniz, yoksa randevularınızı mı okumak istersiniz?"
 
     private var step: Step = .idle
     private var didHandleCurrentSpeech = false
@@ -55,6 +60,16 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
         speak("Sesli komutla devam etmek ister misiniz?")
     }
 
+    func speakAndAskAnotherRequest(_ text: String) {
+        step = .askingAnotherRequest
+        speak(text)
+    }
+
+    func speakAndReturnToMenu(_ text: String) {
+        step = .askingMainChoice
+        speak(text)
+    }
+
     func speak(_ text: String) {
         stopListening()
 
@@ -83,16 +98,6 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
         synthesizer.speak(utterance)
     }
 
-    func speakAndAskCreateAppointment(_ text: String) {
-        step = .askingCreateAfterRead
-        speak(text)
-    }
-
-    func speakAndReturnToMenu(_ text: String) {
-        step = .askingMainChoice
-        speak(text)
-    }
-
     func stopAll() {
         synthesizer.stopSpeaking(at: .immediate)
         stopListening()
@@ -117,8 +122,8 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
                 self.startListening()
             }
 
-        case .askingCreateAfterRead:
-            step = .listeningCreateAfterRead
+        case .askingAnotherRequest:
+            step = .listeningAnotherRequest
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
                 self.startListening()
             }
@@ -247,19 +252,31 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
         text.contains("hayır") ||
         text.contains("hayir") ||
         text.contains("hastane") ||
-        text.contains("randevu") ||
+        text.contains("randevu oku") ||
+        text.contains("randevuları oku") ||
+        text.contains("randevularımı oku") ||
         text.contains("randevular") ||
         text.contains("oku") ||
         text.contains("oluştur") ||
         text.contains("olustur") ||
         text.contains("almak") ||
+        text.contains("al") ||
         text.contains("semptom") ||
         text.contains("septum") ||
         text.contains("şikayet") ||
         text.contains("sikayet") ||
         text.contains("analiz") ||
+        text.contains("aile") ||
+        text.contains("hekim") ||
+        text.contains("profil") ||
+        text.contains("güncelle") ||
+        text.contains("guncelle") ||
+        text.contains("çıkış") ||
+        text.contains("cikis") ||
+        text.contains("kapat") ||
         text.contains("manuel")
     }
+
 
     private func handle(_ text: String) {
         switch step {
@@ -268,47 +285,59 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
             if text.contains("evet") {
                 stopListening()
                 step = .askingMainChoice
-                speak("Hastane randevusu mu almak istersiniz, sesli semptom analizi mi, yoksa randevularınızı okumamı mı istersiniz?")
+                speak(mainMenuPrompt)
+
             } else if text.contains("hayır") || text.contains("hayir") {
                 stopListening()
                 step = .idle
                 speak("Tamam, manuel olarak devam edebilirsiniz.")
                 onManualMode?()
             }
-
         case .listeningMainChoice:
-            if text.contains("semptom") ||
-                text.contains("septum") ||
-                text.contains("şikayet") ||
-                text.contains("sikayet") ||
-                text.contains("analiz") {
+            if text.contains("çıkış") || text.contains("cikis") || text.contains("kapat") {
+                stopListening()
+                step = .idle
+                onLogout?()
 
+            } else if text.contains("oku") ||
+                        text.contains("randevular") ||
+                        text.contains("randevularımı") ||
+                        text.contains("randevu oku") {
+                stopListening()
+                step = .idle
+                onReadAppointments?()
+
+            } else if text.contains("aile") || text.contains("hekim") {
+                stopListening()
+                step = .idle
+                onFamilyDoctorAppointment?()
+
+            } else if text.contains("profil") || text.contains("güncelle") || text.contains("guncelle") {
+                stopListening()
+                step = .idle
+                onProfile?()
+
+            } else if text.contains("semptom") ||
+                        text.contains("septum") ||
+                        text.contains("şikayet") ||
+                        text.contains("sikayet") ||
+                        text.contains("analiz") {
                 stopListening()
                 step = .idle
                 onVoiceSymptom?()
 
             } else if text.contains("hastane") ||
                         text.contains("randevu al") ||
-                        text.contains("almak") ||
+                        text.contains("randevu almak") ||
                         text.contains("oluştur") ||
                         text.contains("olustur") {
-
                 stopListening()
                 step = .idle
                 onCreateAppointment?()
 
-            } else if text.contains("oku") ||
-                        text.contains("randevular") ||
-                        text.contains("randevularımı") {
-
-                stopListening()
-                step = .idle
-                onReadAppointments?()
-
             } else if text.contains("hayır") ||
                         text.contains("hayir") ||
                         text.contains("manuel") {
-
                 stopListening()
                 step = .idle
                 speak("Tamam, manuel olarak devam edebilirsiniz.")
@@ -317,27 +346,31 @@ final class HomeVoiceManager: NSObject, ObservableObject, AVSpeechSynthesizerDel
             } else {
                 stopListening()
                 step = .askingMainChoice
-                speak("Anlayamadım. Hastane randevusu, sesli semptom analizi veya randevularımı oku diyebilirsiniz.")
+                speak("Anlayamadım. \(mainMenuPrompt)")
             }
+        case .listeningAnotherRequest:
+            if text.contains("evet") {
+                stopListening()
+                step = .askingMainChoice
+                speak(mainMenuPrompt)
 
-        case .listeningCreateAfterRead:
-            if text.contains("evet") ||
-                text.contains("hastane") ||
-                text.contains("randevu") ||
-                text.contains("oluştur") ||
-                text.contains("olustur") ||
-                text.contains("almak") {
-
+            } else if text.contains("çıkış") || text.contains("cikis") || text.contains("kapat") {
                 stopListening()
                 step = .idle
-                onCreateAppointment?()
+                onLogout?()
 
-            } else if text.contains("hayır") || text.contains("hayir") {
+            } else if text.contains("hayır") || text.contains("hayir") || text.contains("manuel") {
                 stopListening()
                 step = .idle
                 speak("Tamam, manuel olarak devam edebilirsiniz.")
                 onManualMode?()
+
+            } else {
+                stopListening()
+                step = .askingAnotherRequest
+                speak("Anlayamadım. Başka isteğiniz var mı?")
             }
+
 
         default:
             break

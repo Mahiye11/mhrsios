@@ -5,6 +5,13 @@ import AVFoundation
 @MainActor
 final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
 
+    enum VoiceStep {
+        case idle
+        case listeningSymptom
+        case listeningAnotherAnswer
+        case finished
+    }
+
     @Published var messages: [SymptomChatMessage] = []
     @Published var symptoms: [String] = []
     @Published var isListening = false
@@ -20,10 +27,15 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
     private let synthesizer = AVSpeechSynthesizer()
 
+    private var currentStep: VoiceStep = .idle
     private var shouldOpenMicAfterSpeech = false
     private var shouldNavigateAfterSpeech = false
     private var isFinished = false
     private var isProcessingSpeech = false
+
+    private var lastRecognitionUpdateDate = Date()
+    private let symptomSilenceSeconds: TimeInterval = 4.0
+    private let answerSilenceSeconds: TimeInterval = 3.0
 
     private var lastRecognizedText = ""
     private var lastProcessedText = ""
@@ -39,7 +51,9 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
         guard messages.isEmpty else { return }
 
-        let text = "Merhaba, ben sesli asistanınız MedSes. Lütfen belirtilerinizi söyleyin."
+        currentStep = .listeningSymptom
+
+        let text = "Merhaba, ben sesli asistanınız MedSes. Belirtinizi söyleyin."
         addAssistant(text)
         speak(text, openMicAfter: true)
     }
@@ -57,6 +71,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         shouldOpenMicAfterSpeech = false
         shouldNavigateAfterSpeech = false
         isProcessingSpeech = false
+        currentStep = .idle
     }
 
     func toggleListening() {
@@ -81,14 +96,43 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         lastProcessedText = cleaned
         addUser(cleaned)
 
-        if isNoAnswer(cleaned) {
-            finishSymptoms()
+        switch currentStep {
+        case .listeningSymptom:
+            saveSymptom(cleaned)
+
+        case .listeningAnotherAnswer:
+            if isNoAnswer(cleaned) {
+                finishSymptoms()
+            } else {
+                saveSymptom(cleaned)
+            }
+
+        default:
+            break
+        }
+    }
+
+    private func saveSymptom(_ symptom: String) {
+        let cleaned = cleanText(symptom)
+
+        guard cleaned.count >= 3 else {
+            let warning = "Belirtinizi tam alamadım. Lütfen tekrar söyleyin."
+            addAssistant(warning)
+            speak(warning, openMicAfter: true)
             return
         }
 
-        symptoms.append(cleaned)
+        let alreadyExists = symptoms.contains {
+            normalizeTurkish($0) == normalizeTurkish(cleaned)
+        }
 
-        let question = "Belirtinizi kaydettim. Başka bir şikayetiniz var mı?"
+        if !alreadyExists {
+            symptoms.append(cleaned)
+        }
+
+        currentStep = .listeningAnotherAnswer
+
+        let question = "Başka belirtiniz varsa söyleyin, yoksa yok deyin."
         addAssistant(question)
         speak(question, openMicAfter: true)
     }
@@ -100,8 +144,8 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         guard !isFinished else { return }
 
         stopListening()
-
         lastRecognizedText = ""
+        lastRecognitionUpdateDate = Date()
 
         let audioSession = AVAudioSession.sharedInstance()
 
@@ -127,7 +171,26 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
         recognitionRequest.shouldReportPartialResults = true
         recognitionRequest.requiresOnDeviceRecognition = false
-        
+        recognitionRequest.taskHint = .dictation
+        recognitionRequest.contextualStrings = [
+            "başım ağrıyor",
+            "baş ağrısı",
+            "midem bulanıyor",
+            "kusma",
+            "ateşim var",
+            "öksürüyorum",
+            "boğazım ağrıyor",
+            "nefes almakta zorlanıyorum",
+            "göğsüm ağrıyor",
+            "halsizlik",
+            "halsizim",
+            "baş dönmesi",
+            "karın ağrısı",
+            "yok",
+            "başka yok",
+            "bu kadar"
+        ]
+
         let inputNode = audioEngine.inputNode
         inputNode.removeTap(onBus: 0)
 
@@ -164,47 +227,78 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
                         .trimmingCharacters(in: .whitespacesAndNewlines)
 
                     if !text.isEmpty {
-                        self.lastRecognizedText = text
+                        if text.count >= self.lastRecognizedText.count {
+                            self.lastRecognizedText = text
+                        }
+
+                        self.lastRecognitionUpdateDate = Date()
                         self.restartSilenceTimer()
                     }
                 }
+
                 if let error {
                     print("Speech geçici hata:", error.localizedDescription)
                 }
             }
         }
     }
+
     private func restartSilenceTimer() {
         silenceTask?.cancel()
 
+        let waitSeconds: TimeInterval
+
+        switch currentStep {
+        case .listeningSymptom:
+            waitSeconds = symptomSilenceSeconds
+        case .listeningAnotherAnswer:
+            waitSeconds = answerSilenceSeconds
+        default:
+            waitSeconds = 2.5
+        }
+
         silenceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
 
             await MainActor.run {
-                self?.finishCurrentSpeechIfPossible()
+                guard let self else { return }
+
+                let elapsed = Date().timeIntervalSince(self.lastRecognitionUpdateDate)
+
+                if elapsed >= waitSeconds - 0.2 {
+                    self.finishCurrentSpeechIfPossible()
+                } else {
+                    self.restartSilenceTimer()
+                }
             }
         }
     }
+
     private func finishCurrentSpeechIfPossible() {
         guard !isProcessingSpeech else { return }
 
         let text = cleanText(lastRecognizedText)
-
         isProcessingSpeech = true
-
         stopListening()
 
         guard !text.isEmpty else {
             isProcessingSpeech = false
 
-            let warning = "Sesinizi alamadım. Lütfen tekrar söyleyin."
+            let warning: String
+
+            switch currentStep {
+            case .listeningAnotherAnswer:
+                warning = "Başka belirtiniz varsa söyleyin, yoksa yok deyin."
+            default:
+                warning = "Sesinizi alamadım. Lütfen tekrar söyleyin."
+            }
+
             addAssistant(warning)
             speak(warning, openMicAfter: true)
             return
         }
 
         handleUserText(text)
-
         isProcessingSpeech = false
     }
 
@@ -214,6 +308,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
         if audioEngine.isRunning {
             audioEngine.stop()
+            audioEngine.reset()
         }
 
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -231,6 +326,8 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         stopListening()
 
         if symptoms.isEmpty {
+            currentStep = .listeningSymptom
+
             let text = "Henüz belirti eklemediniz. Lütfen en az bir belirti söyleyin."
             addAssistant(text)
             speak(text, openMicAfter: true)
@@ -238,8 +335,9 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         }
 
         isFinished = true
+        currentStep = .finished
 
-        let text = "Belirtilerinizi aldım. Şimdi size uygun polikliniği hazırlıyorum."
+        let text = "Belirtilerinizi topladım. İlgili poliklinik bulunuyor."
         addAssistant(text)
         speak(text, openMicAfter: false)
 
@@ -339,19 +437,21 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             self.shouldOpenMicAfterSpeech = false
 
             try? await Task.sleep(nanoseconds: 700_000_000)
-
             self.startListening()
         }
     }
 
     private func isNoAnswer(_ text: String) -> Bool {
-        let lower = text.lowercased()
+        let lower = normalizeTurkish(text)
 
-        return lower == "hayır" ||
-               lower == "hayir" ||
+        return lower == "hayir" ||
                lower == "yok" ||
-               lower.contains("başka yok") ||
+               lower == "yok yok" ||
                lower.contains("baska yok") ||
+               lower.contains("başka yok") ||
+               lower.contains("belirtim yok") ||
+               lower.contains("şikayetim yok") ||
+               lower.contains("sikayetim yok") ||
                lower.contains("bu kadar") ||
                lower.contains("yeter") ||
                lower.contains("yeterli") ||
@@ -363,6 +463,17 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ".", with: "")
             .replacingOccurrences(of: ",", with: "")
+    }
+
+    private func normalizeTurkish(_ text: String) -> String {
+        text
+            .lowercased()
+            .replacingOccurrences(of: "ı", with: "i")
+            .replacingOccurrences(of: "ğ", with: "g")
+            .replacingOccurrences(of: "ü", with: "u")
+            .replacingOccurrences(of: "ş", with: "s")
+            .replacingOccurrences(of: "ö", with: "o")
+            .replacingOccurrences(of: "ç", with: "c")
     }
 
     private func addUser(_ text: String) {

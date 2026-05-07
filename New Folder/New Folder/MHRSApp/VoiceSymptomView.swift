@@ -1,10 +1,3 @@
-//
-//  VoiceSymptomView.swift
-//  MHRSApp
-//
-//  Created by Mahiye Zeynep Bayram on 4.05.2026.
-//
-
 import Foundation
 import SwiftUI
 import Speech
@@ -12,6 +5,7 @@ import AVFoundation
 
 struct VoiceSymptomView: View {
     let userId: Int
+
     @StateObject private var vm = VoiceSymptomViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var inputText = ""
@@ -38,7 +32,6 @@ struct VoiceSymptomView: View {
 
                 Spacer()
 
-                // Ortalamayı bozmasın diye görünmez boşluk
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left")
                     Text("Geri")
@@ -46,8 +39,6 @@ struct VoiceSymptomView: View {
                 .font(.headline)
                 .opacity(0)
             }
-            .padding()
-            .background(Color.white)
             .padding()
             .background(Color.white)
 
@@ -59,6 +50,7 @@ struct VoiceSymptomView: View {
                 }
                 .padding()
             }
+
             if !vm.recommendedClinic.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Önerilen Bölüm:")
@@ -133,7 +125,6 @@ struct VoiceSymptomView: View {
             vm.stopAll()
         }
     }
-    
 }
 
 struct ChatBubbleView: View {
@@ -165,4 +156,3 @@ struct SymptomChatMessage: Identifiable {
     let text: String
     let isUser: Bool
 }
-

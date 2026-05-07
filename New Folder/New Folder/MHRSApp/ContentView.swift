@@ -16,13 +16,12 @@ struct ContentView: View {
 
     @StateObject private var vm = LoginViewModel()
     @StateObject private var voiceManager = VoiceManager()
-    
+
     @FocusState private var focusedField: Field?
 
     @State private var isPasswordVisible = false
     @State private var challengeCode = ""
-    
-    
+
     enum Field { case tc, password }
 
     var body: some View {
@@ -68,18 +67,27 @@ struct ContentView: View {
                     .onSubmit {
                         focusedField = .password
                     }
+
                     HStack {
                         Image(systemName: "lock.fill")
                             .foregroundStyle(.blue)
 
                         if isPasswordVisible {
                             TextField("Şifre", text: $password)
+                                .keyboardType(.numberPad)
                                 .textContentType(.password)
                                 .focused($focusedField, equals: .password)
+                                .onChange(of: password) { _, newValue in
+                                    password = String(newValue.filter { $0.isNumber }.prefix(4))
+                                }
                         } else {
                             SecureField("Şifre", text: $password)
+                                .keyboardType(.numberPad)
                                 .textContentType(.password)
                                 .focused($focusedField, equals: .password)
+                                .onChange(of: password) { _, newValue in
+                                    password = String(newValue.filter { $0.isNumber }.prefix(4))
+                                }
                         }
 
                         Button {
@@ -113,7 +121,7 @@ struct ContentView: View {
                         .disabled(vm.isLoading)
 
                         NavigationLink {
-                             UyeOlView()
+                            UyeOlView()
                         } label: {
                             Text("Üye Ol")
                                 .fontWeight(.semibold)
@@ -141,13 +149,13 @@ struct ContentView: View {
                                 .easeInOut(duration: 0.5).repeatForever(autoreverses: true),
                                 value: voiceManager.isListening
                             )
+
                         if !challengeCode.isEmpty {
                             Text(challengeCode)
                                 .font(.system(size: 40, weight: .bold))
-                                .tracking(10) // aralıklı gösterir
+                                .tracking(10)
                                 .padding(.top, 10)
                         }
-                            
                     }
                     .padding(.top, 12)
                 }
@@ -187,9 +195,11 @@ struct ContentView: View {
                         await sendVoiceTCToBackend(audioURL: audioURL)
                     }
                 }
+
                 voiceManager.onSignupSelected = {
                     pushSignup = true
                 }
+
                 voiceManager.onVoiceLoginRecorded = { audioURL in
                     Task {
                         await sendVoiceLoginToBackend(audioURL: audioURL)
@@ -202,20 +212,24 @@ struct ContentView: View {
     private func doLogin() async {
         voiceManager.stopListening()
         focusedField = nil
+
         if tc.count != 11 || !tc.allSatisfy({ $0.isNumber }) {
             vm.error = "TC Kimlik Numarası 11 haneli olmalıdır."
             return
         }
+
         if password.count != 4 || !password.allSatisfy({ $0.isNumber }) {
             vm.error = "Şifre 4 haneli olmalıdır."
             return
         }
+
         if await vm.login(tc: tc, password: password) {
             withAnimation {
                 pushHome = true
             }
         }
     }
+
     private func sendVoiceTCToBackend(audioURL: URL) async {
         do {
             var request = URLRequest(url: APIConfig.recognizeTcURL)
@@ -247,14 +261,15 @@ struct ContentView: View {
                 vm.error = message
                 return
             }
+
             let result = try JSONDecoder().decode(TCResponse.self, from: data)
-            self.tc = result.tcKimlik
+            self.tc = String(result.tcKimlik.filter { $0.isNumber }.prefix(11))
 
             self.challengeCode = String(Int.random(in: 1000...9999))
 
             let spaced = challengeCode.map { String($0) }.joined(separator: " ")
             voiceManager.speak("\(spaced) kodunu tek tek söyleyerek tekrar edin")
-            
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
                 voiceManager.startRecordingVoiceForLogin()
             }
@@ -263,6 +278,7 @@ struct ContentView: View {
             vm.error = "Sesli TC hatası: \(error.localizedDescription)"
         }
     }
+
     private func sendVoiceLoginToBackend(audioURL: URL) async {
         do {
             var request = URLRequest(url: APIConfig.voiceLoginURL)
@@ -305,10 +321,11 @@ struct ContentView: View {
                 vm.error = message
                 return
             }
+
             let result = try JSONDecoder().decode(LoginResponse.self, from: data)
             vm.userId = result.userId
             vm.userName = result.name
-            
+
             withAnimation {
                 pushHome = true
             }
@@ -321,6 +338,7 @@ struct ContentView: View {
 struct TCResponse: Codable {
     let tcKimlik: String
 }
+
 #Preview {
     ContentView()
 }
