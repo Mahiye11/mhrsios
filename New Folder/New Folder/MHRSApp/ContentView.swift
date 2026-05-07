@@ -54,15 +54,20 @@ struct ContentView: View {
                             .keyboardType(.numberPad)
                             .textContentType(.username)
                             .focused($focusedField, equals: .tc)
+                            .onChange(of: tc) { _, newValue in
+                                tc = String(newValue.filter { $0.isNumber }.prefix(11))
+                            }
                     }
                     .padding()
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12).strokeBorder(Color.blue.opacity(0.4))
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.blue.opacity(0.4))
                     )
                     .frame(width: 300)
-                    .onSubmit { focusedField = .password }
-
+                    .onSubmit {
+                        focusedField = .password
+                    }
                     HStack {
                         Image(systemName: "lock.fill")
                             .foregroundStyle(.blue)

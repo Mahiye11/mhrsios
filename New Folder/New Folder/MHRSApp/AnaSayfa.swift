@@ -154,8 +154,12 @@ struct AnaSayfa: View {
                 HastaneRandevuView(userId: userId, initialClinic: nil)
             }
         }
-        .sheet(isPresented: $showAileHekimiSheet) {
-            AileHekimiRandevuView()
+        .sheet(isPresented: $showAileHekimiSheet, onDismiss: {
+            Task {
+                await fetchAppointments()
+            }
+        }) {
+            AileHekimiRandevuView(userId: userId)
         }
         .alert("Hata", isPresented: Binding(
             get: { errorMessage != nil },

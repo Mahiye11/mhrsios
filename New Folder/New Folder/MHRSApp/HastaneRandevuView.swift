@@ -100,6 +100,11 @@ enum AppointmentAPI {
         let (data, _) = try await URLSession.shared.data(from: url)
         return try JSONDecoder().decode([String].self, from: data)
     }
+    static func userAppointments(userId: Int) async throws -> [AppointmentDTO] {
+        let url = APIConfig.appointmentsByUserURL(userId: userId)
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return try JSONDecoder().decode([AppointmentDTO].self, from: data)
+    }
 }
 
 // MARK: - View
@@ -142,7 +147,7 @@ struct HastaneRandevuView: View {
 
             ScrollView {
                 VStack(spacing: 22) {
-                    headerView
+                    
                     appointmentInfoCard
 
                     if showCalendar {
@@ -230,22 +235,6 @@ struct HastaneRandevuView: View {
         }
     }
 
-    private var headerView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(secilenDoktor?.name ?? "Doktor Seçimi")
-                .font(.title3.bold())
-
-            Text("Uygun tarih ve saat seçimi")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(Color.white)
-        .cornerRadius(22)
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 4)
-    }
-
     private var appointmentInfoCard: some View {
         VStack(spacing: 0) {
 
@@ -311,27 +300,6 @@ struct HastaneRandevuView: View {
 
             divider
 
-            pickerRow(title: "Hastane") {
-                Picker("Hastane", selection: $secilenHastane) {
-                    Text("Seçiniz").tag(nil as AppointmentHospitalDTO?)
-                    ForEach(hastaneler) { hastane in
-                        Text(hastane.name).tag(Optional(hastane))
-                    }
-                }
-                .pickerStyle(.menu)
-            }
-            .onChange(of: secilenHastane) { _, _ in
-                Task {
-                    secilenDoktor = nil
-                    doktorlar = []
-                    availableTimes = []
-                    resetDateSelection()
-                    await doktorlariYukle()
-                }
-            }
-
-            divider
-
             pickerRow(title: "Klinik") {
                 Picker("Klinik", selection: $secilenKlinik) {
                     Text("Seçiniz").tag(nil as AppointmentClinicDTO?)
@@ -350,6 +318,26 @@ struct HastaneRandevuView: View {
                     availableTimes = []
                     resetDateSelection()
                     await hastaneleriYukle()
+                }
+            }
+
+            divider
+            pickerRow(title: "Hastane") {
+                Picker("Hastane", selection: $secilenHastane) {
+                    Text("Seçiniz").tag(nil as AppointmentHospitalDTO?)
+                    ForEach(hastaneler) { hastane in
+                        Text(hastane.name).tag(Optional(hastane))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            .onChange(of: secilenHastane) { _, _ in
+                Task {
+                    secilenDoktor = nil
+                    doktorlar = []
+                    availableTimes = []
+                    resetDateSelection()
+                    await doktorlariYukle()
                 }
             }
 
@@ -733,10 +721,14 @@ struct HastaneRandevuView: View {
             selectedTime = nil
         }
     }
-
     private func randevuyuOnayla() {
         guard let secilenDoktor else {
             alertMessage = "Lütfen doktor seçiniz."
+            return
+        }
+
+        guard let secilenKlinik else {
+            alertMessage = "Lütfen klinik seçiniz."
             return
         }
 
@@ -747,11 +739,38 @@ struct HastaneRandevuView: View {
         }
 
         Task {
-            await createAppointment(
-                doctorId: secilenDoktor.id,
-                date: selectedDate,
-                time: selectedTime
-            )
+            do {
+                let mevcutRandevular = try await AppointmentAPI.userAppointments(userId: userId)
+
+                let aktifAyniDoktorKlinikVar = mevcutRandevular.contains { randevu in
+                    let status = randevu.status?.uppercased() ?? ""
+
+                    let iptalDegil =
+                        status != "CANCELLED" &&
+                        status != "CANCELED" &&
+                        status != "İPTAL" &&
+                        status != "IPTAL"
+
+                    return randevu.doctor?.id == secilenDoktor.id &&
+                           randevu.doctor?.clinic?.id == secilenKlinik.id &&
+                           iptalDegil
+                }
+
+                if aktifAyniDoktorKlinikVar {
+                    alertMessage = "Bu doktor ve klinik için zaten aktif bir randevunuz var. İptal ettikten sonra tekrar randevu alabilirsiniz."
+                    return
+                }
+
+                await createAppointment(
+                    doctorId: secilenDoktor.id,
+                    date: selectedDate,
+                    time: selectedTime
+                )
+
+            } catch {
+                print("Randevu kontrol hatası:", error.localizedDescription)
+                alertMessage = "Mevcut randevular kontrol edilemedi."
+            }
         }
     }
 
@@ -832,23 +851,57 @@ struct CalendarGridView: View {
                     let backend = backendDate(date)
                     let isSelected = selectedDate == backend
 
+                    let weekday = Calendar.current.component(.weekday, from: date)
+                    let isWeekend = weekday == 1 || weekday == 7
+
                     Button {
-                        selectedDate = backend
-                        selectedTime = nil
-                        onDateSelected(backend)
+                        if !isWeekend {
+                            selectedDate = backend
+                            selectedTime = nil
+                            onDateSelected(backend)
+                        }
                     } label: {
-                        Text("\(Calendar.current.component(.day, from: date))")
-                            .font(.headline)
-                            .frame(width: 42, height: 42)
-                            .background(isSelected ? Color.red : Color.white)
-                            .foregroundColor(isSelected ? .white : .primary)
-                            .clipShape(Circle())
-                            .overlay(
-                                Circle()
-                                    .stroke(isSelected ? Color.red : Color.blue.opacity(0.35), lineWidth: 1.5)
-                            )
+                        VStack(spacing: 2) {
+
+                            if isWeekend {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            }
+
+                            Text("\(Calendar.current.component(.day, from: date))")
+                                .font(.headline)
+                        }
+                        .frame(width: 42, height: 42)
+                        .background(
+                            isWeekend
+                            ? Color.gray.opacity(0.18)
+                            : isSelected
+                                ? Color.red
+                                : Color.white
+                        )
+                        .foregroundColor(
+                            isWeekend
+                            ? .gray
+                            : isSelected
+                                ? .white
+                                : .primary
+                        )
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(
+                                    isWeekend
+                                    ? Color.gray.opacity(0.4)
+                                    : isSelected
+                                        ? Color.red
+                                        : Color.blue.opacity(0.35),
+                                    lineWidth: 1.5
+                                )
+                        )
                     }
                     .buttonStyle(.plain)
+                    .disabled(isWeekend)
                 }
             }
         }
