@@ -61,8 +61,11 @@ final class FamilyAppointmentVoiceManager: NSObject, ObservableObject, AVSpeechS
     private var pendingRecognitionWorkItem: DispatchWorkItem?
 
     private let synthesizer = AVSpeechSynthesizer()
+    
+    
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "tr-TR"))
 
+    
     private let audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?

@@ -51,9 +51,43 @@ struct VoiceSymptomView: View {
                 .padding()
             }
 
+            if !vm.clinicOptions.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Klinik Seçenekleri")
+                        .font(.headline)
+
+                    ForEach(Array(vm.clinicOptions.enumerated()), id: \.offset) { index, clinic in
+                        HStack {
+                            Text("\(index + 1)")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Color.orange)
+                                .clipShape(Circle())
+
+                            Text(clinic)
+                                .font(.subheadline.bold())
+                                .foregroundColor(.black)
+
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    Text("Sesli olarak birinci, ikinci, üçüncü diyebilir ya da bölüm adını söyleyebilirsiniz.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.orange.opacity(0.12))
+                .cornerRadius(16)
+                .padding(.horizontal)
+            }
+
             if !vm.recommendedClinic.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Önerilen Bölüm:")
+                    Text("Seçilen Bölüm:")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.8))
 
@@ -90,14 +124,16 @@ struct VoiceSymptomView: View {
                     .cornerRadius(22)
 
                 Button {
-                    if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    if trimmed.isEmpty {
                         vm.toggleListening()
                     } else {
-                        vm.handleUserText(inputText)
+                        vm.handleUserText(trimmed)
                         inputText = ""
                     }
                 } label: {
-                    Image(systemName: inputText.isEmpty ? "mic.fill" : "paperplane.fill")
+                    Image(systemName: inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "mic.fill" : "paperplane.fill")
                         .foregroundColor(.white)
                         .frame(width: 52, height: 52)
                         .background(

@@ -9,11 +9,13 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         case idle
         case listeningSymptom
         case listeningAnotherAnswer
+        case choosingClinic
         case finished
     }
 
     @Published var messages: [SymptomChatMessage] = []
     @Published var symptoms: [String] = []
+    @Published var clinicOptions: [String] = []
     @Published var isListening = false
     @Published var isAssistantSpeaking = false
     @Published var aiStatus = "Hazır"
@@ -36,6 +38,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
     private var lastRecognitionUpdateDate = Date()
     private let symptomSilenceSeconds: TimeInterval = 4.0
     private let answerSilenceSeconds: TimeInterval = 3.0
+    private let clinicChoiceSilenceSeconds: TimeInterval = 3.0
 
     private var lastRecognizedText = ""
     private var lastProcessedText = ""
@@ -63,7 +66,6 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         silenceTask = nil
 
         stopListening()
-
         synthesizer.stopSpeaking(at: .immediate)
 
         isListening = false
@@ -86,7 +88,6 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
     func handleUserText(_ text: String) {
         let cleaned = cleanText(text)
-
         guard !cleaned.isEmpty else { return }
 
         if cleaned == lastProcessedText {
@@ -106,6 +107,9 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             } else {
                 saveSymptom(cleaned)
             }
+
+        case .choosingClinic:
+            handleClinicChoice(cleaned)
 
         default:
             break
@@ -172,6 +176,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         recognitionRequest.shouldReportPartialResults = true
         recognitionRequest.requiresOnDeviceRecognition = false
         recognitionRequest.taskHint = .dictation
+
         recognitionRequest.contextualStrings = [
             "başım ağrıyor",
             "baş ağrısı",
@@ -188,7 +193,19 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             "karın ağrısı",
             "yok",
             "başka yok",
-            "bu kadar"
+            "bu kadar",
+            "birinci",
+            "ikinci",
+            "üçüncü",
+            "göğüs hastalıkları",
+            "enfeksiyon hastalıkları",
+            "iç hastalıkları",
+            "dahiliye",
+            "kulak burun boğaz",
+            "kardiyoloji",
+            "nöroloji",
+            "acil tıp",
+            "aile hekimliği"
         ]
 
         let inputNode = audioEngine.inputNode
@@ -253,6 +270,8 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             waitSeconds = symptomSilenceSeconds
         case .listeningAnotherAnswer:
             waitSeconds = answerSilenceSeconds
+        case .choosingClinic:
+            waitSeconds = clinicChoiceSilenceSeconds
         default:
             waitSeconds = 2.5
         }
@@ -289,6 +308,8 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             switch currentStep {
             case .listeningAnotherAnswer:
                 warning = "Başka belirtiniz varsa söyleyin, yoksa yok deyin."
+            case .choosingClinic:
+                warning = "Lütfen birinci, ikinci, üçüncü diyerek ya da bölüm adını söyleyerek seçim yapın."
             default:
                 warning = "Sesinizi alamadım. Lütfen tekrar söyleyin."
             }
@@ -334,10 +355,9 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             return
         }
 
-        isFinished = true
         currentStep = .finished
 
-        let text = "Belirtilerinizi topladım. İlgili poliklinik bulunuyor."
+        let text = "Belirtilerinizi topladım. İlgili poliklinikler bulunuyor."
         addAssistant(text)
         speak(text, openMicAfter: false)
 
@@ -355,14 +375,26 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
             let allSymptomsText = symptoms.joined(separator: ", ")
-            let body = AiRequest(text: allSymptomsText)
 
+            print("AI URL:", APIConfig.aiRecommendationURL.absoluteString)
+            print("Gönderilen belirtiler:", allSymptomsText)
+
+            let body = AiRequest(text: allSymptomsText)
             request.httpBody = try JSONEncoder().encode(body)
 
             let (data, response) = try await URLSession.shared.data(for: request)
 
-            guard let http = response as? HTTPURLResponse,
-                  200..<300 ~= http.statusCode else {
+            guard let http = response as? HTTPURLResponse else {
+                aiStatus = "Sunucu yanıtı alınamadı."
+                addAssistant("Sunucu yanıtı alınamadı.")
+                return
+            }
+
+            let responseText = String(data: data, encoding: .utf8) ?? ""
+            print("HTTP STATUS:", http.statusCode)
+            print("AI RESPONSE:", responseText)
+
+            guard 200..<300 ~= http.statusCode else {
                 aiStatus = "Hata oluştu."
                 addAssistant("Üzgünüm, şu an analiz yapamıyorum.")
                 return
@@ -370,20 +402,76 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
             let decoded = try JSONDecoder().decode(AiResponse.self, from: data)
 
-            recommendedClinic = decoded.tahminEdilenKlinik
             aiStatus = "Analiz tamamlandı."
 
-            let message = decoded.sesliOkunacakMesaj
-            addAssistant(message)
+            let options = Array(decoded.klinikAdaylari.prefix(3))
 
-            shouldNavigateAfterSpeech = true
-            speak(message, openMicAfter: false)
+            if options.isEmpty {
+                recommendedClinic = decoded.tahminEdilenKlinik
+
+                let message = decoded.sesliOkunacakMesaj
+                addAssistant(message)
+
+                shouldNavigateAfterSpeech = true
+                isFinished = true
+                speak(message, openMicAfter: false)
+                return
+            }
+
+            clinicOptions = options
+            currentStep = .choosingClinic
+
+            let optionText = clinicOptions.enumerated().map { index, clinic in
+                "\(index + 1). \(clinic)"
+            }.joined(separator: ", ")
+
+            let message = "Belirtilerinize göre önerilen bölümler şunlar: \(optionText). Hangi bölümü seçmek istersiniz?"
+
+            addAssistant(message)
+            speak(message, openMicAfter: true)
 
         } catch {
             aiStatus = "Bağlantı hatası."
             addAssistant("Bağlantı hatası oluştu.")
             print("AI ERROR:", error.localizedDescription)
         }
+    }
+
+    private func handleClinicChoice(_ text: String) {
+        let normalized = normalizeTurkish(text)
+
+        var selected: String?
+
+        if normalized.contains("birinci") || normalized == "bir" || normalized.contains("1") || normalized.contains("ilk") {
+            selected = clinicOptions.indices.contains(0) ? clinicOptions[0] : nil
+        } else if normalized.contains("ikinci") || normalized == "iki" || normalized.contains("2") {
+            selected = clinicOptions.indices.contains(1) ? clinicOptions[1] : nil
+        } else if normalized.contains("ucuncu") || normalized == "uc" || normalized.contains("3") {
+            selected = clinicOptions.indices.contains(2) ? clinicOptions[2] : nil
+        } else {
+            selected = clinicOptions.first { clinic in
+                let normalizedClinic = normalizeTurkish(clinic)
+                return normalizedClinic.contains(normalized) || normalized.contains(normalizedClinic)
+            }
+        }
+
+        guard let selected else {
+            let message = "Seçiminizi anlayamadım. Birinci, ikinci, üçüncü diyebilir ya da bölüm adını söyleyebilirsiniz."
+            addAssistant(message)
+            speak(message, openMicAfter: true)
+            return
+        }
+
+        recommendedClinic = selected
+        clinicOptions = []
+        currentStep = .finished
+        isFinished = true
+
+        let message = "\(selected) seçildi. Hastane randevu ekranına yönlendiriliyorsunuz."
+        addAssistant(message)
+
+        shouldNavigateAfterSpeech = true
+        speak(message, openMicAfter: false)
     }
 
     private func speak(_ text: String, openMicAfter: Bool) {
@@ -448,9 +536,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
                lower == "yok" ||
                lower == "yok yok" ||
                lower.contains("baska yok") ||
-               lower.contains("başka yok") ||
                lower.contains("belirtim yok") ||
-               lower.contains("şikayetim yok") ||
                lower.contains("sikayetim yok") ||
                lower.contains("bu kadar") ||
                lower.contains("yeter") ||
@@ -474,6 +560,9 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             .replacingOccurrences(of: "ş", with: "s")
             .replacingOccurrences(of: "ö", with: "o")
             .replacingOccurrences(of: "ç", with: "c")
+            .replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func addUser(_ text: String) {
@@ -498,10 +587,43 @@ struct AiRequest: Codable {
 
 struct AiResponse: Decodable {
     let tahminEdilenKlinik: String
+    let klinikAdaylari: [String]
     let sesliOkunacakMesaj: String
+    let hastalikTahmin: String
+    let guvenOrani: Double
+    let aciliyetDurumu: String
+    let acilUyarisi: String
 
     enum CodingKeys: String, CodingKey {
         case tahminEdilenKlinik = "tahmin_edilen_klinik"
+        case klinikAdaylari = "klinik_adaylari"
         case sesliOkunacakMesaj = "sesli_okunacak_mesaj"
+        case onerilenKlinik = "onerilen_klinik"
+        case hastalikTahmin = "hastalik_tahmin"
+        case guvenOrani = "guven_orani"
+        case aciliyetDurumu = "aciliyet_durumu"
+        case acilUyarisi = "acil_uyarisi"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let liste1 = try? container.decodeIfPresent([String].self, forKey: .tahminEdilenKlinik)
+        let liste2 = try? container.decodeIfPresent([String].self, forKey: .onerilenKlinik)
+        let liste3 = try? container.decodeIfPresent([String].self, forKey: .klinikAdaylari)
+
+        let backendKlinikler = liste1 ?? liste2 ?? liste3 ?? []
+
+        self.tahminEdilenKlinik = backendKlinikler.first ?? ""
+        self.klinikAdaylari = backendKlinikler
+
+        self.hastalikTahmin = (try? container.decodeIfPresent(String.self, forKey: .hastalikTahmin)) ?? ""
+        self.guvenOrani = (try? container.decodeIfPresent(Double.self, forKey: .guvenOrani)) ?? 0.0
+        self.aciliyetDurumu = (try? container.decodeIfPresent(String.self, forKey: .aciliyetDurumu)) ?? "NORMAL"
+        self.acilUyarisi = (try? container.decodeIfPresent(String.self, forKey: .acilUyarisi)) ?? ""
+
+        self.sesliOkunacakMesaj =
+            (try? container.decodeIfPresent(String.self, forKey: .sesliOkunacakMesaj)) ??
+            "Belirtilerinize göre önerilen bölümler: \(backendKlinikler.prefix(3).joined(separator: ", "))"
     }
 }

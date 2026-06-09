@@ -16,8 +16,12 @@ struct AnaSayfa: View {
     @State private var pushVoiceSymptom = false
     @State private var pushProfile = false
     @State private var pushToHastane = false
+    
 
     @StateObject private var homeVoice = HomeVoiceManager()
+    
+    
+    
     @Environment(\.dismiss) private var dismiss
     
     private let mainMenuPrompt = "Hastane randevusu mu, aile hekimi randevusu mu, sesli semptom analizi mi, profil bilgilerinizi güncellemek mi istersiniz, yoksa randevularınızı mı okumak istersiniz?"
