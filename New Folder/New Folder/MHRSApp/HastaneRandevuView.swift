@@ -53,6 +53,9 @@ enum AppointmentVoiceStep {
     case clinic
     case hospital
     case doctor
+    case date
+    case time
+    case creatingAppointment
     case finished
     case manual
 }
@@ -100,6 +103,7 @@ enum AppointmentAPI {
         let (data, _) = try await URLSession.shared.data(from: url)
         return try JSONDecoder().decode([String].self, from: data)
     }
+
     static func userAppointments(userId: Int) async throws -> [AppointmentDTO] {
         let url = APIConfig.appointmentsByUserURL(userId: userId)
         let (data, _) = try await URLSession.shared.data(from: url)
@@ -119,6 +123,8 @@ struct HastaneRandevuView: View {
     @StateObject private var voiceManager = AppointmentVoiceManager()
 
     @State private var voiceStep: AppointmentVoiceStep = .chooseMode
+    @State private var isVoiceFlowActive = false
+    @State private var isProcessingVoiceAnswer = false
 
     @State private var iller: [String] = []
     @State private var ilceler: [String] = []
@@ -147,7 +153,6 @@ struct HastaneRandevuView: View {
 
             ScrollView {
                 VStack(spacing: 22) {
-                    
                     appointmentInfoCard
 
                     if showCalendar {
@@ -167,6 +172,7 @@ struct HastaneRandevuView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
+                    isVoiceFlowActive = false
                     voiceManager.stopAll()
                     dismiss()
                 } label: {
@@ -181,18 +187,35 @@ struct HastaneRandevuView: View {
             locationManager.requestLocationPermissionOnce()
             await ilkVerileriYukle()
 
+            let hasVoicePermission = await voiceManager.requestPermissionsIfNeeded()
+
+            guard hasVoicePermission else {
+                alertMessage = "Sesli komut için mikrofon ve konuşma tanıma izinleri gerekli."
+                return
+            }
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 voiceStep = .chooseMode
                 voiceManager.speakAndListen("Sesli komutla devam etmek ister misiniz, yoksa manuel mi?")
             }
         }
         .onReceive(voiceManager.$recognizedText) { text in
-            guard !text.isEmpty else { return }
-            guard !voiceManager.isSpeaking else { return }
-            guard voiceManager.isListening == false else { return }
+            let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanText.isEmpty, !isProcessingVoiceAnswer else { return }
 
             Task {
-                await handleVoiceCommand(text)
+                await handleVoiceCommand(cleanText)
+            }
+        }
+        .onReceive(voiceManager.$emptySpeechCount) { count in
+            guard count > 0,
+                  !isProcessingVoiceAnswer,
+                  !voiceManager.isSpeaking else {
+                return
+            }
+
+            Task {
+                await repeatCurrentVoiceQuestionAfterNoSpeech()
             }
         }
         .onChange(of: locationManager.detectedCity) { _, city in
@@ -216,6 +239,7 @@ struct HastaneRandevuView: View {
             }
         }
         .onDisappear {
+            isVoiceFlowActive = false
             voiceManager.stopAll()
         }
         .alert("Uyarı", isPresented: Binding(
@@ -248,6 +272,8 @@ struct HastaneRandevuView: View {
                 .pickerStyle(.menu)
             }
             .onChange(of: secilenIl) { _, yeniIl in
+                guard !isVoiceFlowActive else { return }
+
                 Task {
                     secilenIlce = nil
                     ilceler = []
@@ -287,6 +313,8 @@ struct HastaneRandevuView: View {
                 .pickerStyle(.menu)
             }
             .onChange(of: secilenIlce) { _, _ in
+                guard !isVoiceFlowActive else { return }
+
                 Task {
                     secilenHastane = nil
                     hastaneler = []
@@ -310,6 +338,8 @@ struct HastaneRandevuView: View {
                 .pickerStyle(.menu)
             }
             .onChange(of: secilenKlinik) { _, _ in
+                guard !isVoiceFlowActive else { return }
+
                 Task {
                     secilenHastane = nil
                     hastaneler = []
@@ -322,6 +352,7 @@ struct HastaneRandevuView: View {
             }
 
             divider
+
             pickerRow(title: "Hastane") {
                 Picker("Hastane", selection: $secilenHastane) {
                     Text("Seçiniz").tag(nil as AppointmentHospitalDTO?)
@@ -332,6 +363,8 @@ struct HastaneRandevuView: View {
                 .pickerStyle(.menu)
             }
             .onChange(of: secilenHastane) { _, _ in
+                guard !isVoiceFlowActive else { return }
+
                 Task {
                     secilenDoktor = nil
                     doktorlar = []
@@ -353,6 +386,8 @@ struct HastaneRandevuView: View {
                 .pickerStyle(.menu)
             }
             .onChange(of: secilenDoktor) { _, _ in
+                guard !isVoiceFlowActive else { return }
+
                 availableTimes = []
                 resetDateSelection()
             }
@@ -406,6 +441,7 @@ struct HastaneRandevuView: View {
     private var actionButtons: some View {
         VStack(spacing: 12) {
             Button {
+                isVoiceFlowActive = false
                 voiceManager.stopAll()
                 voiceStep = .manual
                 randevuAra()
@@ -423,6 +459,7 @@ struct HastaneRandevuView: View {
             }
 
             Button {
+                isVoiceFlowActive = false
                 voiceManager.stopAll()
                 randevuyuOnayla()
             } label: {
@@ -444,6 +481,7 @@ struct HastaneRandevuView: View {
             .disabled(selectedDate == nil || selectedTime == nil)
 
             Button(role: .destructive) {
+                isVoiceFlowActive = false
                 voiceManager.stopAll()
                 temizle()
             } label: {
@@ -564,7 +602,7 @@ struct HastaneRandevuView: View {
     }
 
     @MainActor
-    private func createAppointment(doctorId: Int, date: String, time: String) async {
+    private func createAppointment(doctorId: Int, date: String, time: String) async -> Bool {
         let appointmentDateTime = "\(date)T\(time):00"
 
         let body = CreateAppointmentRequest(
@@ -584,125 +622,300 @@ struct HastaneRandevuView: View {
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 alertMessage = "Sunucudan geçersiz cevap geldi."
-                return
+                return false
             }
 
             guard 200..<300 ~= httpResponse.statusCode else {
                 let serverMessage = String(data: data, encoding: .utf8) ?? ""
                 print("Randevu oluşturma hatası:", httpResponse.statusCode, serverMessage)
                 alertMessage = serverMessage.isEmpty ? "Randevu oluşturulamadı." : serverMessage
-                return
+                return false
             }
 
             alertMessage = "Randevunuz başarıyla oluşturuldu."
-            temizle()
+            return true
 
         } catch {
             print("Randevu oluşturma bağlantı hatası:", error.localizedDescription)
             alertMessage = "Bağlantı hatası oluştu."
+            return false
         }
     }
 
     @MainActor
     private func handleVoiceCommand(_ rawText: String) async {
+        guard !isProcessingVoiceAnswer else { return }
+
+        isProcessingVoiceAnswer = true
+        defer { isProcessingVoiceAnswer = false }
+
         let text = normalizeVoiceText(rawText)
         voiceManager.clearRecognizedText()
 
         switch voiceStep {
 
         case .chooseMode:
-            if text.contains("manuel") || text.contains("elle") {
+            if text.contains("manuel") || text.contains("elle") || text.contains("hayır") || text.contains("hayir") {
+                isVoiceFlowActive = false
                 voiceStep = .manual
                 voiceManager.speakOnly("Manuel moda geçiyorum. Seçimlerinizi ekrandan yapabilirsiniz.")
                 return
             }
 
-            if text.contains("sesli") || text.contains("ses") || text.contains("sesle") {
+            if text.contains("evet") || text.contains("sesli") || text.contains("ses") || text.contains("sesle") {
+                isVoiceFlowActive = true
                 voiceStep = .city
                 voiceManager.speakAndListen("Sesli moda geçiyorum. Lütfen il söyleyin.")
                 return
             }
 
-            voiceManager.speakAndListen("Anlayamadım. Sesli komut mu, manuel mi?")
-            return
+            voiceManager.speakAndListen("Anlayamadım. Sesli devam etmek istiyorsanız evet, manuel devam etmek istiyorsanız manuel deyin.")
 
         case .city:
-            if let matchedCity = iller.first(where: {
+            guard isVoiceFlowActive else { return }
+
+            guard let matchedCity = iller.first(where: {
                 normalizeVoiceText($0).contains(text) || text.contains(normalizeVoiceText($0))
-            }) {
-                secilenIl = matchedCity
-
-                do {
-                    ilceler = try await AppointmentAPI.districts(city: matchedCity)
-                } catch {
-                    voiceManager.speakAndListen("İlçeler yüklenemedi. Lütfen tekrar il söyleyin.")
-                    return
-                }
-
-                voiceStep = .district
-                voiceManager.speakAndListen("\(matchedCity) seçildi. Lütfen ilçe söyleyin.")
-            } else {
+            }) else {
                 voiceManager.speakAndListen("Bu ili bulamadım. Lütfen tekrar il söyleyin.")
+                return
             }
+
+            secilenIl = matchedCity
+            secilenIlce = nil
+            ilceler = []
+            secilenHastane = nil
+            hastaneler = []
+            secilenDoktor = nil
+            doktorlar = []
+            availableTimes = []
+            resetDateSelection()
+
+            do {
+                ilceler = try await AppointmentAPI.districts(city: matchedCity)
+            } catch {
+                voiceManager.speakAndListen("İlçeler yüklenemedi. Lütfen tekrar il söyleyin.")
+                return
+            }
+
+            voiceStep = .district
+            voiceManager.speakAndListen("\(matchedCity) seçildi. Lütfen ilçe söyleyin.")
 
         case .district:
-            if let matchedDistrict = ilceler.first(where: {
+            guard isVoiceFlowActive else { return }
+
+            guard let matchedDistrict = ilceler.first(where: {
                 normalizeVoiceText($0).contains(text) || text.contains(normalizeVoiceText($0))
-            }) {
-                secilenIlce = matchedDistrict
-                voiceStep = .clinic
-                voiceManager.speakAndListen("\(matchedDistrict) seçildi. Lütfen klinik söyleyin.")
-            } else {
+            }) else {
                 voiceManager.speakAndListen("Bu ilçeyi bulamadım. Lütfen tekrar ilçe söyleyin.")
+                return
             }
+
+            secilenIlce = matchedDistrict
+            secilenHastane = nil
+            hastaneler = []
+            secilenDoktor = nil
+            doktorlar = []
+            availableTimes = []
+            resetDateSelection()
+
+            voiceStep = .clinic
+            voiceManager.speakAndListen("\(matchedDistrict) seçildi. Lütfen klinik söyleyin.")
+
         case .clinic:
-            if let matchedClinic = klinikler.first(where: {
+            guard isVoiceFlowActive else { return }
+
+            guard let matchedClinic = klinikler.first(where: {
                 normalizeVoiceText($0.name).contains(text) || text.contains(normalizeVoiceText($0.name))
-            }) {
-                secilenKlinik = matchedClinic
-
-                await hastaneleriYukle()
-
-                voiceStep = .hospital
-                voiceManager.speakAndListen("\(matchedClinic.name) seçildi. Lütfen hastane söyleyin.")
-            } else {
+            }) else {
                 voiceManager.speakAndListen("Bu kliniği bulamadım. Lütfen tekrar klinik söyleyin.")
+                return
             }
+
+            secilenKlinik = matchedClinic
+            secilenHastane = nil
+            hastaneler = []
+            secilenDoktor = nil
+            doktorlar = []
+            availableTimes = []
+            resetDateSelection()
+
+            await hastaneleriYukle()
+
+            guard !hastaneler.isEmpty else {
+                voiceManager.speakAndListen("Bu il, ilçe ve klinik için hastane bulunamadı. Lütfen tekrar klinik söyleyin.")
+                return
+            }
+
+            voiceStep = .hospital
+            voiceManager.speakAndListen("\(matchedClinic.name) seçildi. Lütfen hastane söyleyin.")
 
         case .hospital:
-            if let matchedHospital = hastaneler.first(where: {
-                normalizeVoiceText($0.name).contains(text) || text.contains(normalizeVoiceText($0.name))
-            }) {
-                secilenHastane = matchedHospital
-                await doktorlariYukle()
+            guard isVoiceFlowActive else { return }
 
-                voiceStep = .doctor
-                voiceManager.speakAndListen("\(matchedHospital.name) seçildi. Lütfen doktor adı söyleyin.")
-            } else {
+            guard let matchedHospital = hastaneler.first(where: {
+                normalizeVoiceText($0.name).contains(text) || text.contains(normalizeVoiceText($0.name))
+            }) else {
                 voiceManager.speakAndListen("Bu hastaneyi bulamadım. Lütfen tekrar hastane söyleyin.")
+                return
             }
+
+            secilenHastane = matchedHospital
+            secilenDoktor = nil
+            doktorlar = []
+            availableTimes = []
+            resetDateSelection()
+
+            await doktorlariYukle()
+
+            guard !doktorlar.isEmpty else {
+                voiceManager.speakAndListen("Bu hastane ve klinik için doktor bulunamadı. Lütfen tekrar hastane söyleyin.")
+                return
+            }
+
+            voiceStep = .doctor
+            voiceManager.speakAndListen("\(matchedHospital.name) seçildi. Lütfen doktor adı söyleyin.")
 
         case .doctor:
-            if let matchedDoctor = doktorlar.first(where: {
+            guard isVoiceFlowActive else { return }
+
+            guard let matchedDoctor = doktorlar.first(where: {
                 normalizeVoiceText($0.name).contains(text) || text.contains(normalizeVoiceText($0.name))
-            }) {
-                secilenDoktor = matchedDoctor
-                voiceStep = .finished
-
-                withAnimation {
-                    showCalendar = true
-                    selectedDate = nil
-                    selectedTime = nil
-                }
-
-                voiceManager.speakOnly("\(matchedDoctor.name) seçildi. Şimdi ekrandan tarih ve saat seçebilirsiniz.")
-            } else {
+            }) else {
                 voiceManager.speakAndListen("Bu doktoru bulamadım. Lütfen tekrar doktor adı söyleyin.")
+                return
             }
+
+            secilenDoktor = matchedDoctor
+            availableTimes = []
+
+            withAnimation {
+                showCalendar = true
+                selectedDate = nil
+                selectedTime = nil
+            }
+
+            voiceStep = .date
+            voiceManager.speakAndListen("\(matchedDoctor.name) seçildi. Lütfen tarih söyleyin. Örneğin 15 Haziran.")
+
+        case .date:
+            guard isVoiceFlowActive else { return }
+
+            guard let parsedDate = parseTurkishDate(text) else {
+                voiceManager.speakAndListen("Tarihi anlayamadım. Lütfen tekrar söyleyin. Örneğin 15 Haziran.")
+                return
+            }
+
+            guard isSelectableAppointmentDate(parsedDate) else {
+                voiceManager.speakAndListen("Bu tarih takvimde seçilebilir değil. Lütfen önümüzdeki iki hafta içinden hafta içi bir tarih söyleyin.")
+                return
+            }
+
+            selectedDate = parsedDate
+            selectedTime = nil
+            availableTimes = []
+
+            await loadAvailableSlots(date: parsedDate)
+
+            guard !availableTimes.isEmpty else {
+                voiceManager.speakAndListen("Bu tarihte uygun saat bulunamadı. Lütfen başka bir tarih söyleyin.")
+                return
+            }
+
+            voiceStep = .time
+
+            let uygunSaatler = availableTimes.prefix(5).joined(separator: ", ")
+            voiceManager.speakAndListen("Tarih seçildi. Uygun saatlerden bazıları: \(uygunSaatler). Lütfen saat söyleyin.")
+
+        case .time:
+            guard isVoiceFlowActive else { return }
+
+            guard let formattedTime = parseTurkishTime(text) else {
+                voiceManager.speakAndListen("Saati anlayamadım. Lütfen tekrar söyleyin. Örneğin 09 30.")
+                return
+            }
+
+            guard availableTimes.contains(formattedTime) else {
+                let uygunSaatler = availableTimes.prefix(5).joined(separator: ", ")
+                voiceManager.speakAndListen("Bu saat uygun değil. Uygun saatlerden bazıları: \(uygunSaatler). Lütfen başka saat söyleyin.")
+                return
+            }
+
+            selectedTime = formattedTime
+            voiceStep = .creatingAppointment
+            voiceManager.speakOnly("Randevunuz oluşturuluyor.")
+
+            guard let doctorId = secilenDoktor?.id,
+                  let selectedDate,
+                  let selectedTime else {
+                voiceStep = .time
+                voiceManager.speakAndListen("Randevu bilgileri eksik. Lütfen tekrar saat söyleyin.")
+                return
+            }
+
+            let success = await createAppointment(
+                doctorId: doctorId,
+                date: selectedDate,
+                time: selectedTime
+            )
+
+            if success {
+                alertMessage = nil
+                isVoiceFlowActive = false
+                voiceStep = .finished
+                voiceManager.speakOnly("Randevunuz başarıyla oluşturuldu. Ana sayfaya yönlendiriliyorsunuz.")
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    temizle()
+                    dismiss()
+                }
+            } else {
+                voiceStep = .time
+                voiceManager.speakAndListen("Randevu oluşturulamadı. Lütfen başka bir saat söyleyin.")
+            }
+
+        case .creatingAppointment:
+            return
 
         case .finished, .manual:
             return
         }
+    }
+
+    @MainActor
+    private func repeatCurrentVoiceQuestionAfterNoSpeech() async {
+        guard !voiceManager.isSpeaking,
+              !isProcessingVoiceAnswer,
+              voiceStep != .manual,
+              voiceStep != .finished,
+              voiceStep != .creatingAppointment else {
+            return
+        }
+
+        let prompt: String
+
+        switch voiceStep {
+        case .chooseMode:
+            prompt = "Sesli devam etmek istiyorsanız evet, manuel devam etmek istiyorsanız manuel deyin."
+        case .city:
+            prompt = "Sizi duyamadım. Lütfen il söyleyin."
+        case .district:
+            prompt = "Sizi duyamadım. Lütfen ilçe söyleyin."
+        case .clinic:
+            prompt = "Sizi duyamadım. Lütfen klinik söyleyin."
+        case .hospital:
+            prompt = "Sizi duyamadım. Lütfen hastane söyleyin."
+        case .doctor:
+            prompt = "Sizi duyamadım. Lütfen doktor adı söyleyin."
+        case .date:
+            prompt = "Sizi duyamadım. Lütfen tarih söyleyin. Örneğin 15 Haziran."
+        case .time:
+            prompt = "Sizi duyamadım. Lütfen saat söyleyin. Örneğin 09 30."
+        case .creatingAppointment, .finished, .manual:
+            return
+        }
+
+        voiceManager.speakAndListen(prompt)
     }
 
     private func randevuAra() {
@@ -721,6 +934,7 @@ struct HastaneRandevuView: View {
             selectedTime = nil
         }
     }
+
     private func randevuyuOnayla() {
         guard let secilenDoktor else {
             alertMessage = "Lütfen doktor seçiniz."
@@ -761,11 +975,15 @@ struct HastaneRandevuView: View {
                     return
                 }
 
-                await createAppointment(
+                let success = await createAppointment(
                     doctorId: secilenDoktor.id,
                     date: selectedDate,
                     time: selectedTime
                 )
+
+                if success {
+                    temizle()
+                }
 
             } catch {
                 print("Randevu kontrol hatası:", error.localizedDescription)
@@ -781,6 +999,7 @@ struct HastaneRandevuView: View {
     }
 
     private func temizle() {
+        isVoiceFlowActive = false
         secilenIl = nil
         secilenIlce = nil
         ilceler = []
@@ -796,7 +1015,7 @@ struct HastaneRandevuView: View {
 
     private func normalizeVoiceText(_ text: String) -> String {
         text
-            .lowercased()
+            .lowercased(with: Locale(identifier: "tr_TR"))
             .replacingOccurrences(of: "ı", with: "i")
             .replacingOccurrences(of: "ğ", with: "g")
             .replacingOccurrences(of: "ü", with: "u")
@@ -806,6 +1025,198 @@ struct HastaneRandevuView: View {
             .replacingOccurrences(of: ".", with: "")
             .replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func parseTurkishDate(_ text: String) -> String? {
+        let normalized = normalizeVoiceText(text)
+
+        let monthMap: [String: Int] = [
+            "ocak": 1,
+            "subat": 2,
+            "mart": 3,
+            "nisan": 4,
+            "mayis": 5,
+            "haziran": 6,
+            "temmuz": 7,
+            "agustos": 8,
+            "eylul": 9,
+            "ekim": 10,
+            "kasim": 11,
+            "aralik": 12
+        ]
+
+        var selectedMonth: Int?
+
+        for (monthName, monthNumber) in monthMap {
+            if normalized.contains(monthName) {
+                selectedMonth = monthNumber
+                break
+            }
+        }
+
+        let numbers = extractNumbers(from: normalized)
+
+        guard let day = numbers.first else {
+            return nil
+        }
+
+        let month: Int?
+
+        if let selectedMonth {
+            month = selectedMonth
+        } else if numbers.count >= 2 {
+            month = numbers[1]
+        } else {
+            month = nil
+        }
+
+        guard let finalMonth = month,
+              day >= 1,
+              day <= 31,
+              finalMonth >= 1,
+              finalMonth <= 12 else {
+            return nil
+        }
+
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: Date())
+
+        var components = DateComponents()
+        components.year = year
+        components.month = finalMonth
+        components.day = day
+
+        guard let date = calendar.date(from: components) else {
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        return formatter.string(from: date)
+    }
+
+    private func parseTurkishTime(_ text: String) -> String? {
+        let normalized = normalizeVoiceText(text)
+        let numbers = extractNumbers(from: normalized)
+
+        guard !numbers.isEmpty else {
+            return nil
+        }
+
+        let hour = numbers[0]
+        let minute = numbers.count >= 2 ? numbers[1] : 0
+
+        guard hour >= 0,
+              hour <= 23,
+              minute >= 0,
+              minute <= 59 else {
+            return nil
+        }
+
+        return String(format: "%02d:%02d", hour, minute)
+    }
+
+    private func isSelectableAppointmentDate(_ backendDate: String) -> Bool {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        guard let date = formatter.date(from: backendDate) else {
+            return false
+        }
+
+        let calendar = Calendar.current
+        let selectedDay = calendar.startOfDay(for: date)
+        let today = calendar.startOfDay(for: Date())
+
+        guard let lastSelectableDay = calendar.date(byAdding: .day, value: 13, to: today),
+              selectedDay >= today,
+              selectedDay <= lastSelectableDay else {
+            return false
+        }
+
+        let weekday = calendar.component(.weekday, from: selectedDay)
+        return weekday != 1 && weekday != 7
+    }
+
+    private func extractNumbers(from text: String) -> [Int] {
+        var result: [Int] = []
+
+        let tokens = text
+            .replacingOccurrences(of: ":", with: " ")
+            .replacingOccurrences(of: "/", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map(String.init)
+
+        var index = 0
+
+        while index < tokens.count {
+            let token = tokens[index]
+
+            if let number = Int(token) {
+                result.append(number)
+                index += 1
+                continue
+            }
+
+            if token == "bucuk" {
+                result.append(30)
+                index += 1
+                continue
+            }
+
+            guard let wordNumber = turkishNumberWordToInt(token) else {
+                index += 1
+                continue
+            }
+
+            if index + 1 < tokens.count,
+               wordNumber >= 10,
+               wordNumber % 10 == 0,
+               let nextNumber = turkishNumberWordToInt(tokens[index + 1]),
+               nextNumber > 0,
+               nextNumber < 10 {
+                result.append(wordNumber + nextNumber)
+                index += 2
+            } else {
+                result.append(wordNumber)
+                index += 1
+            }
+        }
+
+        return result
+    }
+
+    private func turkishNumberWordToInt(_ word: String) -> Int? {
+        let map: [String: Int] = [
+            "sifir": 0,
+            "bir": 1,
+            "iki": 2,
+            "uc": 3,
+            "dort": 4,
+            "bes": 5,
+            "alti": 6,
+            "yedi": 7,
+            "sekiz": 8,
+            "dokuz": 9,
+            "on": 10,
+            "onbir": 11,
+            "oniki": 12,
+            "onuc": 13,
+            "ondort": 14,
+            "onbes": 15,
+            "onalti": 16,
+            "onyedi": 17,
+            "onsekiz": 18,
+            "ondokuz": 19,
+            "yirmi": 20,
+            "otuz": 30,
+            "kirk": 40,
+            "elli": 50
+        ]
+
+        return map[word]
     }
 }
 
@@ -862,7 +1273,6 @@ struct CalendarGridView: View {
                         }
                     } label: {
                         VStack(spacing: 2) {
-
                             if isWeekend {
                                 Image(systemName: "lock.fill")
                                     .font(.caption2)
@@ -1118,6 +1528,7 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
     @Published var recognizedText: String = ""
     @Published var isListening = false
     @Published var isSpeaking = false
+    @Published var emptySpeechCount = 0
 
     private let synthesizer = AVSpeechSynthesizer()
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "tr-TR"))
@@ -1129,11 +1540,61 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
 
     private var lastText = ""
     private var shouldListenAfterSpeaking = false
+    private var didCompleteCurrentListen = false
+    private var isStoppingListening = false
+    private var listeningGeneration = 0
 
     override init() {
         super.init()
         synthesizer.delegate = self
-        requestPermissions()
+    }
+
+    func requestPermissionsIfNeeded() async -> Bool {
+        let speechGranted: Bool
+
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized:
+            speechGranted = true
+
+        case .notDetermined:
+            speechGranted = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status == .authorized)
+                }
+            }
+
+        case .denied, .restricted:
+            speechGranted = false
+
+        @unknown default:
+            speechGranted = false
+        }
+
+        let session = AVAudioSession.sharedInstance()
+        let micGranted: Bool
+
+        switch session.recordPermission {
+        case .granted:
+            micGranted = true
+
+        case .undetermined:
+            micGranted = await withCheckedContinuation { continuation in
+                session.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+
+        case .denied:
+            micGranted = false
+
+        @unknown default:
+            micGranted = false
+        }
+
+        print("Speech izni:", speechGranted)
+        print("Mikrofon izni:", micGranted)
+
+        return speechGranted && micGranted
     }
 
     func clearRecognizedText() {
@@ -1162,6 +1623,7 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
 
         recognizedText = ""
         lastText = ""
+        didCompleteCurrentListen = true
         silenceTask?.cancel()
         silenceTask = nil
 
@@ -1210,10 +1672,25 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
             print("Speech izni yok.")
             return
         }
+
+        guard AVAudioSession.sharedInstance().recordPermission == .granted else {
+            print("Mikrofon izni yok.")
+            return
+        }
+
+        guard speechRecognizer?.isAvailable == true else {
+            print("Speech recognizer hazır değil.")
+            return
+        }
+
         recognizedText = ""
         lastText = ""
+        didCompleteCurrentListen = false
 
         stopListening()
+        didCompleteCurrentListen = false
+        listeningGeneration += 1
+        let generation = listeningGeneration
 
         let session = AVAudioSession.sharedInstance()
 
@@ -1246,8 +1723,11 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
             return
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
+        let request = recognitionRequest
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            guard buffer.frameLength > 0 else { return }
+            request.append(buffer)
         }
 
         audioEngine.prepare()
@@ -1265,6 +1745,9 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
             guard let self else { return }
 
             Task { @MainActor in
+                guard generation == self.listeningGeneration else { return }
+                guard !self.didCompleteCurrentListen else { return }
+
                 if let result {
                     let text = result.bestTranscription.formattedString
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1276,12 +1759,25 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
                 }
 
                 if let error {
-                    print("Speech hata:", error.localizedDescription)
+                    guard !self.didCompleteCurrentListen else { return }
+
+                    let message = error.localizedDescription
+
+                    if message == "Recognition request was canceled" || self.isStoppingListening {
+                        return
+                    }
+
+                    print("Speech hata:", message)
+
+                    if self.lastText.isEmpty {
+                        self.stopListening()
+                        self.emptySpeechCount += 1
+                    } else {
+                        self.finishListening()
+                    }
                 }
             }
         }
-
-        restartSilenceTimer()
     }
 
     private func restartSilenceTimer() {
@@ -1297,22 +1793,27 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
     }
 
     private func finishListening() {
+        guard !didCompleteCurrentListen else { return }
+
         let finalText = lastText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        stopListening()
+        didCompleteCurrentListen = true
 
         guard !finalText.isEmpty else {
-            speakAndListen("Sesinizi alamadım. Lütfen tekrar söyleyin.")
+            stopListening()
+            print("Ses boş geldi.")
+            emptySpeechCount += 1
             return
         }
-        recognizedText = finalText
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.recognizedText = ""
-        }
+        stopListening()
+        print("ALGILANAN SES:", finalText)
+        recognizedText = finalText
     }
 
     private func stopListening() {
+        isStoppingListening = true
+        listeningGeneration += 1
         silenceTask?.cancel()
         silenceTask = nil
 
@@ -1329,16 +1830,7 @@ final class AppointmentVoiceManager: NSObject, ObservableObject, AVSpeechSynthes
         recognitionTask = nil
 
         isListening = false
-    }
-
-    private func requestPermissions() {
-        SFSpeechRecognizer.requestAuthorization { status in
-            print("Speech izin durumu:", status.rawValue)
-        }
-
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
-            print("Mikrofon izni:", granted)
-        }
+        isStoppingListening = false
     }
 }
 

@@ -28,6 +28,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
     private var recognitionTask: SFSpeechRecognitionTask?
 
     private let synthesizer = AVSpeechSynthesizer()
+    private var activeUtterance: AVSpeechUtterance?
 
     private var currentStep: VoiceStep = .idle
     private var shouldOpenMicAfterSpeech = false
@@ -149,6 +150,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
         stopListening()
         lastRecognizedText = ""
+        lastProcessedText = ""
         lastRecognitionUpdateDate = Date()
 
         let audioSession = AVAudioSession.sharedInstance()
@@ -342,7 +344,6 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
         isListening = false
     }
-
     private func finishSymptoms() {
         stopListening()
 
@@ -356,6 +357,7 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         }
 
         currentStep = .finished
+        isFinished = false
 
         let text = "Belirtilerinizi topladım. İlgili poliklinikler bulunuyor."
         addAssistant(text)
@@ -365,7 +367,6 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             await analyzeSymptoms()
         }
     }
-
     private func analyzeSymptoms() async {
         aiStatus = "Analiz ediliyor..."
 
@@ -404,30 +405,37 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
 
             aiStatus = "Analiz tamamlandı."
 
-            let options = Array(decoded.klinikAdaylari.prefix(3))
+            var options = Array(decoded.klinikAdaylari.prefix(3))
 
-            if options.isEmpty {
-                recommendedClinic = decoded.tahminEdilenKlinik
+            if options.isEmpty, !decoded.tahminEdilenKlinik.isEmpty {
+                options = [decoded.tahminEdilenKlinik]
+            }
 
-                let message = decoded.sesliOkunacakMesaj
+            guard !options.isEmpty else {
+                currentStep = .listeningSymptom
+                isFinished = false
+
+                let message = "Uygun poliklinik bulunamadı. Lütfen belirtilerinizi tekrar söyleyin."
                 addAssistant(message)
-
-                shouldNavigateAfterSpeech = true
-                isFinished = true
-                speak(message, openMicAfter: false)
+                speak(message, openMicAfter: true)
                 return
             }
 
             clinicOptions = options
+            recommendedClinic = ""
             currentStep = .choosingClinic
+            isFinished = false
+            shouldNavigateAfterSpeech = false
 
             let optionText = clinicOptions.enumerated().map { index, clinic in
                 "\(index + 1). \(clinic)"
             }.joined(separator: ", ")
 
-            let message = "Belirtilerinize göre önerilen bölümler şunlar: \(optionText). Hangi bölümü seçmek istersiniz?"
+            let message = "Belirtilerinize göre önerilen bölümler şunlar: \(optionText). Hangi bölümü seçmek istersiniz? Birinci, ikinci, üçüncü diyebilir ya da bölüm adını söyleyebilirsiniz."
 
             addAssistant(message)
+
+            // Klinikler okunduktan sonra mikrofon açılır.
             speak(message, openMicAfter: true)
 
         } catch {
@@ -436,7 +444,6 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
             print("AI ERROR:", error.localizedDescription)
         }
     }
-
     private func handleClinicChoice(_ text: String) {
         let normalized = normalizeTurkish(text)
 
@@ -470,19 +477,20 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         let message = "\(selected) seçildi. Hastane randevu ekranına yönlendiriliyorsunuz."
         addAssistant(message)
 
+        // Klinik seçilmeden yönlendirme yapılmaz. Seçimden sonra konuşma bitince yönlendirir.
         shouldNavigateAfterSpeech = true
         speak(message, openMicAfter: false)
     }
-
     private func speak(_ text: String, openMicAfter: Bool) {
         stopListening()
 
-        shouldOpenMicAfterSpeech = openMicAfter
-        isAssistantSpeaking = true
-
         if synthesizer.isSpeaking {
+            activeUtterance = nil
             synthesizer.stopSpeaking(at: .immediate)
         }
+
+        shouldOpenMicAfterSpeech = openMicAfter
+        isAssistantSpeaking = true
 
         let session = AVAudioSession.sharedInstance()
 
@@ -502,30 +510,51 @@ final class VoiceSymptomViewModel: NSObject, ObservableObject, AVSpeechSynthesiz
         utterance.rate = 0.45
         utterance.volume = 1.0
 
+        activeUtterance = utterance
         synthesizer.speak(utterance)
     }
-
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer,
         didFinish utterance: AVSpeechUtterance
     ) {
         Task { @MainActor in
+            guard self.activeUtterance === utterance else { return }
+
+            self.activeUtterance = nil
+            self.handleAssistantSpeechFinished()
+        }
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didCancel utterance: AVSpeechUtterance
+    ) {
+        Task { @MainActor in
+            guard self.activeUtterance === utterance else { return }
+
+            self.activeUtterance = nil
             self.isAssistantSpeaking = false
+        }
+    }
 
-            if self.shouldNavigateAfterSpeech {
-                self.shouldNavigateAfterSpeech = false
-                self.shouldNavigateToAppointment = true
-                return
-            }
+    private func handleAssistantSpeechFinished() {
+        isAssistantSpeaking = false
 
-            guard self.shouldOpenMicAfterSpeech, !self.isFinished else {
-                return
-            }
+        if shouldNavigateAfterSpeech {
+            shouldNavigateAfterSpeech = false
+            shouldNavigateToAppointment = true
+            return
+        }
 
-            self.shouldOpenMicAfterSpeech = false
+        guard shouldOpenMicAfterSpeech, !isFinished else {
+            return
+        }
 
+        shouldOpenMicAfterSpeech = false
+
+        Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            self.startListening()
+            startListening()
         }
     }
 
